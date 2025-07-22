@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "clip-insights-459600",
+  "private_key_id": "ee0c751a2ac389c7ab25f9e9d600c7f1aa5fec0e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDB+KRvsbN6svgm\n9xaYwcjahuYodBlEB8jFRMY3R4zAiHeTKsmK0pVfd1A65Pde5cPqwgM5/HIPwQYM\nj8Vdl/AEP6jQVkxEeDFYlYe3PDQn7qzMbRIOGM1gv5XclZnMwgVBEewIUKfkh9Lt\nAexGeVmGWH3f9RjBSC4h3LgA8PmwmwurSgO6XhEDBYhephg8ltr4Ww8P8CKqGrNh\n47TLONomrKc1Dq8A/O2Havjs9fOW1mn3oywO+mkPjab37U6ED0XT35PQ8DRIrAOU\nf5EjMJPqii0jm4TDQ84pqOOZDRmsdRoZf+Yo0pJe7QX8coAZoBwvb5vGekgXjLmy\nYvL760dbAgMBAAECggEAUDyPnKpnwVIl50xfewnyET8rFsHLr8H+kWd9DOHafcwV\nlnllDDlG08oxlGMhVo55x/LATey4q/6fB3QzYp9WiBNjO+buvoXvd6LHFIthUcFf\nlmJpzQ4Casplbe0uRS5e6QdGWTwv7w8mN6cLey14VGPnkcw7lLxMZPJ95NnJl30a\nAJ9+0Q2cISBDvxUFgnpNkjF9gJM6Gzcl1ZBrprqkpvLPQs4dPsvPXb8gt9Wat6/m\nAZBS3gjx3OW5+QHsafJddTEAjGjX7G3G7HH3LVoepBnpzyuspNlgpgNhX8SI0cDp\n73wJVBQ4HQzFF23wvAxasDpAoHDIm9dtWrRB5zjIZQKBgQD2bBrCse5LGddINKAV\nFtOfXiqjmo/DI/UaVYi9pDZaKPai1m1hDE5NhjDSDmFS5/DA0pkRyVGIeY6x9GIF\ntyEqy3ojF8zmKk/PV6hgxcVyqAHaVdT05YXwciyu2MIeuE0WYz6ljgQ1rJDRJlnC\nniRftPrxrBe0T5wLk2HnSCVRDwKBgQDJgqbEfbZTfE51NAfd9J4KVlWlzXcMmpzR\nTJ+Mm7XoTLLpurY2FF0NookijK+tW6BCzMCEa2fmUvtFT87nLZe193I0iujqMDEV\nSRga3VBstqx5Cdk+Cm+hG1BDZWhniJFibZNgdJpupUq6/mZckSs1Dr4bAQMXkG7K\nwtP++RgM9QKBgBITFddoA6mAiLjkG0XQuc77sjbz1E2k6op28aOvUslELer9vWIb\n6/ZlvFj78wmIt7D9AXs7f/55pAzLdxEiQI2KBThju4S6X8Y+kLwgZX4mcpRYLVmV\nKEDdrwdYIMzuCcF1oBe2lfp14N1mabkLrnFSrgFh9Q8ls7Vppwm20f3jAoGBAL+U\nMj7PEd+vZ9wv2mbfoL1NNWJLxCo8eGjYQzvn8frnqJVkCMXDeHB1HZG2VXMokGXR\nyhpbDs3ACNnttVS+WOUMWwyvIB8+L/v/oSYxULv6tGDixyIfw99UW2un5qnAAhCl\nAp+KXCRji3faU7Ef5wcre/uqa6kkjODCd9CKO55dAoGBAPVdSHrV2nxm3D06Bq9C\noIo/zTCKBz0E7lIa/qVFebVjr4Ge7VC9yzUzVRlwOkHWkrlZAgBO1d0J21MlDKwP\naszFMgusZT38HpYUoElmuhmyyCxjn4q7n7F4qJg6aR2ZWrYpUMKX5YhsVmWY2uqB\np7sG7Y6mfiIada1aa84pNWgX\n-----END PRIVATE KEY-----\n",
+  "client_email": "clip-insights@clip-insights-459600.iam.gserviceaccount.com",
+  "client_id": "116212236717928371865",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/clip-insights%40clip-insights-459600.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

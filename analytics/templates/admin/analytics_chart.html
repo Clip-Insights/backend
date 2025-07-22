@@ -1,0 +1,79 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+  <h2>Analytics Summary (Last 7 Days)</h2>
+
+  <canvas id="analyticsChart" width="900" height="350"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+     const analyticsLabels = JSON.parse('{{ labels|escapejs }}');
+    const analyticsPageViews = JSON.parse('{{ page_views|escapejs }}');
+    const analyticsActiveUsers = JSON.parse('{{ active_users|escapejs }}');
+    const analyticsNewUsers = JSON.parse('{{ new_users|escapejs }}');
+    const analyticsSessions = JSON.parse('{{ sessions|escapejs }}');
+
+    const analyticsData = {
+      labels: analyticsLabels,
+      datasets: [
+        {
+          label: 'Page Views',
+          data: analyticsPageViews,
+          borderColor: 'rgba(54, 162, 235, 1)',
+          backgroundColor: 'rgba(54, 162, 235, 0.2)',
+          tension: 0.4
+        },
+        {
+          label: 'Active Users',
+          data: analyticsActiveUsers,
+          borderColor: 'rgba(255, 99, 132, 1)',
+          backgroundColor: 'rgba(255, 99, 132, 0.2)',
+          tension: 0.4
+        },
+        {
+          label: 'New Users',
+          data: analyticsNewUsers,
+          borderColor: 'rgba(255, 206, 86, 1)',
+          backgroundColor: 'rgba(255, 206, 86, 0.2)',
+          tension: 0.4
+        },
+        {
+          label: 'Sessions',
+          data: analyticsSessions,
+          borderColor: 'rgba(75, 192, 192, 1)',
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          tension: 0.4
+        }
+      ]
+    };
+
+    const config = {
+      type: 'line',
+      data: analyticsData,
+      options: {
+        responsive: true,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        stacked: false,
+        plugins: {
+          title: {
+            display: true,
+            text: 'Website Analytics Trends'
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    };
+
+    new Chart(document.getElementById('analyticsChart'), config);
+  </script>
+
+  <hr>
+  {{ block.super }}
+{% endblock %}
