@@ -27,7 +27,7 @@ def get_embedding_model(model_name='all-MiniLM-L6-v2'):
     else:
         print(f"Downloading embeddings: {model_name}")
         embeddings = HuggingFaceEmbeddings(model_name=model_name)
-        embeddings.client.save_pretrained(model_path)
+        embeddings._client.save_pretrained(model_path)
         return embeddings
 
 class GoogleKeyManager:
