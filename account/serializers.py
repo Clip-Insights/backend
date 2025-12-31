@@ -1,10 +1,13 @@
-import credentials
+import os
+from dotenv import load_dotenv
 from .utils import Util
 from .models import User
 from rest_framework import serializers
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
+
+load_dotenv()
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -61,7 +64,7 @@ class SendPasswordResetEmailSerializer(serializers.Serializer):
             user = User.objects.get(email=email)
             uid = urlsafe_base64_encode(force_bytes(str(user.id)))
             token = PasswordResetTokenGenerator().make_token(user)
-            domain = credentials.EMAIL_URL_DOMAIN
+            domain = os.getenv('EMAIL_URL_DOMAIN', 'http://localhost:3000/')
             link = domain + "reset-password/" + uid + "/" + token
             # print("Password Reset Link", link)
 

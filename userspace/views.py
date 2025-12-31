@@ -2,7 +2,7 @@ import os
 import jwt
 import uuid
 import boto3
-import credentials
+from dotenv import load_dotenv
 from django.db.models import Q
 from django.conf import settings
 from django.utils.timezone import now
@@ -16,8 +16,15 @@ from .models import File, Folder
 from .serializers import FileSerializer, FolderSerializer
 from account.models import User
 from botocore.exceptions import ClientError
-from credentials import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_STORAGE_BUCKET_NAME
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+
+load_dotenv()
+
+# Load AWS credentials from environment
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION')
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
 
 class FileAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser, JSONParser)
@@ -27,9 +34,9 @@ class FileAPIView(APIView):
         super().__init__()
         self.s3_client = boto3.client(
             "s3",
-            aws_access_key_id=credentials.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=credentials.AWS_SECRET_ACCESS_KEY,
-            region_name=credentials.AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
         )
 
     def get_user_id(self, request):
@@ -200,9 +207,9 @@ class FolderAPIView(APIView):
         super().__init__()
         self.s3_client = boto3.client(
             "s3",
-            aws_access_key_id=credentials.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=credentials.AWS_SECRET_ACCESS_KEY,
-            region_name=credentials.AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
         )
 
     def get(self, request):

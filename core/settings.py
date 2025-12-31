@@ -11,7 +11,6 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 import os
-import credentials
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
@@ -29,7 +28,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY="django-insecure-c&h%o@dnxbu(kh^rso$m6qnf9_)nr(=(qx_3aw!dq__l4otp34"
 ENVIRONMENT = os.getenv("DJANGO_ENV", "development")
 DEBUG = ENVIRONMENT != "production"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",") if not DEBUG else ["*"]
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 INSTALLED_APPS = [
@@ -122,11 +121,11 @@ CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins (not recommended for producti
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("POSTGRES_DB", "clipinsights"),
-        "USER": os.getenv("POSTGRES_USER", "postgres"),
-        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "root"),
-        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
-        "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        "NAME": os.getenv("DATABASE_NAME", ""),
+        "USER": os.getenv("DATABASE_USER", ""),
+        "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
+        "HOST": os.getenv("DATABASE_HOST", ""),
+        "PORT": os.getenv("DATABASE_PORT", ""),
     }
 }
 
@@ -135,18 +134,10 @@ DATABASES = {
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 
@@ -200,53 +191,50 @@ SIMPLE_JWT = {
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "mail.clipinsights.com"
 EMAIL_PORT = 465
-EMAIL_HOST_USER = credentials.EMAIL_USERNAME
-EMAIL_HOST_PASSWORD = credentials.EMAIL_PASSWORD
+EMAIL_HOST_USER = os.getenv("EMAIL_USERNAME")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_USE_TLS = False
 EMAIL_USE_SSL = True
 PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Saving Backend Logs
+log_directory = "logs"
+log_file = os.path.join(log_directory, "django.log")
 
-if ENVIRONMENT == "production":
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)
 
-    log_directory = "logs"
-    log_file = os.path.join(log_directory, "django.log")
+if not os.path.isfile(log_file):
+    open(log_file, "w").close()
 
-    if not os.path.exists(log_directory):
-        os.makedirs(log_directory)
-
-    if not os.path.isfile(log_file):
-        open(log_file, "w").close()
-
-    LOGGING = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "handlers": {
-            "file": {
-                "level": "DEBUG",
-                "class": "logging.FileHandler",
-                "filename": log_file,
-            },
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "file": {
+            "level": "DEBUG",
+            "class": "logging.FileHandler",
+            "filename": log_file,
         },
-        "loggers": {
-            "django": {
-                "handlers": ["file"],
-                "level": "DEBUG",
-                "propagate": True,
-            },
-            "django.request": {
-                "handlers": ["file"],
-                "level": "ERROR",
-                "propagate": False,
-            },
-            "django.db.backends": {
-                "handlers": ["file"],
-                "level": "ERROR",
-                "propagate": False,
-            },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["file"],
+            "level": "DEBUG",
+            "propagate": True,
         },
-    }
+        "django.request": {
+            "handlers": ["file"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "django.db.backends": {
+            "handlers": ["file"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}
 
 
 AUTH_USER_MODEL = "account.User"
