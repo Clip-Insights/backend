@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import timedelta
+from utils.logger import TracebackFormatter
+from datetime import datetime
 
 load_dotenv()
 
@@ -198,43 +200,56 @@ EMAIL_USE_SSL = True
 PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Saving Backend Logs
-log_directory = "logs"
-log_file = os.path.join(log_directory, "django.log")
 
-if not os.path.exists(log_directory):
-    os.makedirs(log_directory)
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
 
-if not os.path.isfile(log_file):
-    open(log_file, "w").close()
-
+LOG_FILE = os.path.join(LOG_DIR, f"{datetime.now().strftime('%Y-%m-%d')}.log")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {
+        "detailed": {
+            "()": TracebackFormatter,  # use custom formatter
+            "format": "[%(asctime)s.%(msecs)03d] %(levelname)s "
+                    "%(name)s.py:%(lineno)d (%(funcName)s) :: %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
     "handlers": {
         "file": {
-            "level": "DEBUG",
-            "class": "logging.FileHandler",
-            "filename": log_file,
+            "level": "INFO",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": LOG_FILE,
+            "maxBytes": 50 * 1024 * 1024,  # 50 MB
+            "backupCount": 10,
+            "formatter": "detailed",
+            "encoding": "utf-8",
         },
+        "console": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "detailed",
+        },
+    },
+    "root": {
+        "handlers": ["file", "console"],
+        "level": "INFO",
     },
     "loggers": {
         "django": {
-            "handlers": ["file"],
-            "level": "DEBUG",
-            "propagate": True,
-        },
-        "django.request": {
-            "handlers": ["file"],
-            "level": "ERROR",
+            "handlers": ["file", "console"],
+            "level": "INFO",
             "propagate": False,
         },
-        "django.db.backends": {
-            "handlers": ["file"],
+        "django.request": {
+            "handlers": ["file", "console"],
             "level": "ERROR",
             "propagate": False,
         },
     },
 }
+
 
 
 AUTH_USER_MODEL = "account.User"

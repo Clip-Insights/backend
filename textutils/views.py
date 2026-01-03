@@ -28,6 +28,8 @@ from .ai_config import (
     TEXT_SPLITTER,
     VECTOR_STORE
 )
+
+logger = logging.getLogger(__name__)
 from .utils import parse_keypoints, robust_json_parser, fix_pydantic_validation
 from .serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
 
@@ -92,10 +94,10 @@ class ChatView(APIView):
                 
                 # Create chunks from transcription
                 chunks = TEXT_SPLITTER.split_text(transcription)
-                print(f"Created {len(chunks)} chunks")
+                logger.info(f"Created {len(chunks)} chunks")
                 
                 if len(chunks) == 0:
-                    print("Warning: No chunks were created from the transcription!")
+                    logger.error("Warning: No chunks were created from the transcription!")
                     return False
                 
                 # Prepare metadata for each chunk
@@ -113,14 +115,14 @@ class ChatView(APIView):
                     texts=chunks,
                     metadatas=metadatas
                 )
-                print("Embeddings stored successfully in PGVector.")
+                logger.info("Embeddings stored successfully in PGVector.")
 
                 transcript_entry.slice_time = slice_time
                 transcript_entry.save()
                 return True
 
             except Exception as e:
-                print(f"Error during transcription and embedding storage: {e}")
+                logger.error(f"Error during transcription and embedding storage: {e}")
                 raise
             
         def generate_streaming_response():
@@ -135,11 +137,11 @@ class ChatView(APIView):
                 )
                 
                 if not relevant_docs:
-                    print("No relevant documents found, using truncated transcription")
+                    logger.info("No relevant documents found, using truncated transcription")
                     context = transcription[:1000]
                 else:
                     context = "\n\n".join(doc.page_content for doc in relevant_docs)
-                    print(f"Retrieved {len(relevant_docs)} documents, context length: {len(context)} characters")
+                    logger.info(f"Retrieved {len(relevant_docs)} documents, context length: {len(context)} characters")
                 
                 if chat_memory_enabled and chat_history:
                     chat_context = "\n".join([
@@ -171,7 +173,7 @@ class ChatView(APIView):
                 yield "data: [DONE]\n\n"
 
             except Exception as e:
-                print(f"Error during chat streaming: {e}")
+                logger.error(f"Error during chat streaming: {e}")
                 yield f"data: Something went wrong\n\n"
 
         if stream_mode:
@@ -185,7 +187,7 @@ class ChatView(APIView):
             else:
                 response['Access-Control-Allow-Origin'] = 'https://www.youtube.com'
             response['Access-Control-Allow-Credentials'] = 'true'
-            print(response.headers)
+            logger.info(f"Response headers: {response.headers}")
             return response
         else:
             try:
@@ -195,7 +197,7 @@ class ChatView(APIView):
                     status=status.HTTP_200_OK
                 )
             except Exception as e:
-                print(f"Failed to process chat: {str(e)}")
+                logger.error(f"Failed to process chat: {str(e)}")
                 return Response(
                     {"error": f"Something went wrong"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -244,9 +246,9 @@ class SummaryView(APIView):
 
         youtube_url = validated_data.get('youtube_url')
         transcript = validated_data.get('transcription')
-        print("Transcript:>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", transcript)
+        logger.info(f"Transcript: {transcript}")
         slice_time = validated_data.get('slice_time', -1)
-        print("Tokens", len(transcript) // 3.5)
+        logger.info(f"Tokens: {len(transcript) // 3.5}")
         if not youtube_url:
             return Response(
                 {'youtube_url': ['This field is required.']},
@@ -283,14 +285,14 @@ class SummaryView(APIView):
                         'slice_time': video_resource.slice_time,
                         'view_count': video_resource.view_count
                     }
-                    print("Retrieved from cache")
+                    logger.info("Retrieved from cache")
                     success = True
                     summary = None
                     keypoints = None
                     return JsonResponse(response_data, status=status.HTTP_200_OK)
 
             response = self._get_summary_keypoints(transcript)
-            print("Response:>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", response)
+            logger.info(f"Response: {response}")
             success = response["success"]
             if success:
                 summary = response["data"]["summary"]
@@ -321,7 +323,7 @@ class SummaryView(APIView):
             if caching == True and success == True:
                 try:
                     if summary and keypoints:
-                        print("storing in database")
+                        logger.info("storing in database")
                         VideoResource.objects.create(
                             youtube_url=youtube_url,
                             summary=summary,
@@ -331,7 +333,7 @@ class SummaryView(APIView):
                         )
                         
                 except Exception as db_error:
-                    print(f"Database Error: {db_error}")
+                    logger.error(f"Database Error: {db_error}")
 
     def _get_summary_keypoints(self, transcript):
         try:
@@ -344,7 +346,7 @@ class SummaryView(APIView):
             
             full_prompt = f"{system_message}\n\n{formatted_prompt}"
             
-            print(f"Using LLM with key rotation for summary generation")
+            logger.info("Using LLM with key rotation for summary generation")
             
             # Invoke LLM using LangChain interface
             response = llm.invoke(full_prompt)

@@ -1,6 +1,8 @@
 import ast
 import re
 import json
+import logging
+logger = logging.getLogger(__name__)
 
 def parse_keypoints(keypoints_str: str) -> list:
     """
@@ -16,8 +18,8 @@ def parse_keypoints(keypoints_str: str) -> list:
     try:
         # First attempt: Try using ast.literal_eval
         try:
-            print(keypoints_str)
-            print(type(keypoints_str))
+            logger.info(keypoints_str)
+            logger.info(type(keypoints_str))
             if type(keypoints_str) == list:
                 return keypoints_str
             return ast.literal_eval(keypoints_str)
@@ -47,7 +49,7 @@ def parse_keypoints(keypoints_str: str) -> list:
         return [item for item in items if item]
         
     except Exception as e:
-        print(f"Error parsing keypoints: {str(e)}")
+        logger.error(f"Error parsing keypoints: {str(e)}")
         return False
 
 def robust_json_parser(response_text):
@@ -104,7 +106,7 @@ def robust_json_parser(response_text):
         raise ValueError("Unable to find valid summary and keypoints")
         
     except Exception as e:
-        print(f"JSON parsing error: {str(e)}")
+        logger.error(f"JSON parsing error: {str(e)}")
         return None
     
 def fix_pydantic_validation(response_text):
@@ -144,5 +146,5 @@ def fix_pydantic_validation(response_text):
     
     except Exception as e:
         # Log the error or handle it as needed
-        print(f"JSON parsing error: {str(e)}")
+        logger.error     (f"JSON parsing error: {str(e)}")
         return None

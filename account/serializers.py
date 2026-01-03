@@ -66,7 +66,6 @@ class SendPasswordResetEmailSerializer(serializers.Serializer):
             token = PasswordResetTokenGenerator().make_token(user)
             domain = os.getenv('EMAIL_URL_DOMAIN', 'http://localhost:3000/')
             link = domain + "reset-password/" + uid + "/" + token
-            # print("Password Reset Link", link)
 
             data = {
                 "subject": "Password Reset Request",

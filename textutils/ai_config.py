@@ -8,7 +8,8 @@ import os
 from collections import deque
 from typing import List, Optional
 from dotenv import load_dotenv
-import random
+import logging
+logger = logging.getLogger(__name__)
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -67,9 +68,9 @@ def _load_api_keys() -> List[str]:
 try:
     api_keys = _load_api_keys()
     key_manager = APIKeyManager(api_keys)
-    print(f"✓ Initialized API key manager with {len(api_keys)} keys")
+    logger.info(f"✓ Initialized API key manager with {len(api_keys)} keys")
 except Exception as e:
-    print(f"✗ Failed to initialize API key manager: {e}")
+    logger.error(f"✗ Failed to initialize API key manager: {e}")
     key_manager = None
 
 
@@ -88,7 +89,7 @@ def get_llm(streaming: bool = True, temperature: Optional[float] = None) -> Chat
         raise RuntimeError("API key manager not initialized. Check LLM_API_KEYS in .env file")
     
     api_key = key_manager.get_next_key()
-    print(f"Using API Key: {api_key[:15]}****")
+    logger.info(f"Using API Key: {api_key[:15]}****")
     temp = temperature if temperature is not None else LLM_TEMPERATURE
     
     return ChatGoogleGenerativeAI(
@@ -113,10 +114,10 @@ def get_embedding_model(model_name: str = 'all-MiniLM-L6-v2') -> HuggingFaceEmbe
     model_path = os.path.join(EMBEDDINGS_DIR, model_name)
     
     if os.path.exists(model_path):
-        print(f"✓ Loading embeddings from: {model_path}")
+        logger.info(f"✓ Loading embeddings from: {model_path}")
         return HuggingFaceEmbeddings(model_name=model_path)
     else:
-        print(f"⬇ Downloading embeddings: {model_name}")
+        logger.info(f"⬇ Downloading embeddings: {model_name}")
         embeddings = HuggingFaceEmbeddings(model_name=model_name)
         embeddings._client.save_pretrained(model_path)
         return embeddings
@@ -159,23 +160,23 @@ def get_vector_store(
             connection=CONNECTION_STRING,
             use_jsonb=True,
         )
-        print(f"✓ PGVector store initialized: {collection_name}")
+        logger.info(f"✓ PGVector store initialized: {collection_name}")
         return vectorstore
     except Exception as e:
-        print(f"✗ Failed to initialize PGVector store: {e}")
+        logger.info(f"✗ Failed to initialize PGVector store: {e}")
         raise
 
 
 # Initialize global instances
-print("Initializing AI components...")
+logger.info("Initializing AI components...")
 EMBEDDING_MODEL = get_embedding_model()
 TEXT_SPLITTER = get_text_splitter()
 
 try:
     VECTOR_STORE = get_vector_store(embedding_model=EMBEDDING_MODEL)
-    print("✓ All AI components initialized successfully")
+    logger.info("✓ All AI components initialized successfully")
 except Exception as e:
-    print(f"✗ Warning: PGVector store initialization failed: {e}")
+    logger.error(f"✗ Warning: PGVector store initialization failed: {e}")
     VECTOR_STORE = None
 
 
