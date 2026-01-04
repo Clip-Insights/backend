@@ -1,47 +1,32 @@
-# Use a slim Python 3.12 image as the base
-FROM python:3.12-slim
+FROM python:3.13-slim
 
-# Prevent Python from buffering stdout/stderr
-ENV PYTHONUNBUFFERED=1
-# Ensure Django picks up the correct settings module
-ENV DJANGO_SETTINGS_MODULE=core.settings
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libbz2-dev \
-    libffi-dev \
-    liblzma-dev \
-    libncurses5-dev \
-    libncursesw5-dev \
-    libreadline-dev \
-    libssl-dev \
-    netcat-traditional \
-    tk-dev \
-    xz-utils \
-    zlib1g-dev \
+# System deps
+RUN apt-get update && apt-get install -y \
+    curl \
     ca-certificates \
-    libpq-dev \
-    pkg-config \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory inside the container
+# ✅ Install uv via pip (reliable in slim images)
+RUN pip install --no-cache-dir uv
+
 WORKDIR /app
 
-# Copy and install Python dependencies
-COPY requirements.txt ./
-RUN pip install --upgrade pip \
-  && pip install --no-cache-dir -r requirements.txt
+# Copy dependency files first
+COPY pyproject.toml uv.lock ./
 
-# Copy the rest of the Django project into the container
+# Install dependencies
+RUN uv sync --frozen
+
+# Copy project code
 COPY . .
 
-# Download and cache the 'all-MiniLM-L6-v2' model
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Run migrations and collectstatic (if applicable)
+RUN uv run python manage.py migrate
+RUN uv run python manage.py collectstatic
 
-# Expose port 8000 for the application
 EXPOSE 8000
 
-# Run Gunicorn as the production server
-CMD ["gunicorn", "--chdir", "/app", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+CMD ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:8000"]
