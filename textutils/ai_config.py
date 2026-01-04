@@ -33,7 +33,7 @@ DB_PASSWORD = os.getenv("DATABASE_PASSWORD", "root")
 DB_HOST = os.getenv("DATABASE_HOST", "localhost")
 DB_PORT = os.getenv("DATABASE_PORT", "5432")
 
-CONNECTION_STRING = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+CONNECTION_STRING = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=verify-full"
 
 
 class APIKeyManager:
@@ -98,7 +98,6 @@ def get_llm(streaming: bool = True, temperature: Optional[float] = None) -> Chat
         temperature=temp,
         streaming=streaming
     )
-
 
 def get_embedding_model(model_name: str = 'all-MiniLM-L6-v2') -> HuggingFaceEmbeddings:
     """
