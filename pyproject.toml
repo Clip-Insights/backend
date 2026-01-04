@@ -24,6 +24,7 @@ dependencies = [
     "yt-dlp>=2025.12.8",
     "sentence-transformers>=5.2.0",
     "psycopg[binary]>=3.3.2",
+    "torch>=2.9.1",
     "django-cockroachdb>=6.0",
 ]
 
@@ -31,3 +32,8 @@ dependencies = [
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }

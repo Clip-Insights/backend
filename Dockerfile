@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ Install uv via pip (reliable in slim images)
+# Install uv
 RUN pip install --no-cache-dir uv
 
 WORKDIR /app
@@ -23,10 +23,12 @@ RUN uv sync --frozen
 # Copy project code
 COPY . .
 
-# Run migrations and collectstatic (if applicable)
-RUN uv run python manage.py migrate
-RUN uv run python manage.py collectstatic
+# Copy the entrypoint script and make it executable
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-EXPOSE 8000
 
-CMD ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:8000"]
+ENV PORT=8000
+
+# Run the script when container starts
+CMD ["/app/entrypoint.sh"]
