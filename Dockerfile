@@ -14,21 +14,18 @@ RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-# Copy dependency files first
+# Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
+# Install dependencies (This will now install uvicorn)
 RUN uv sync --frozen
 
 # Copy project code
 COPY . .
 
-# Copy the entrypoint script and make it executable
+# Copy entrypoint script and make executable
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-
-ENV PORT=8000
-
-# Run the script when container starts
+# Start via the script
 CMD ["/app/entrypoint.sh"]
