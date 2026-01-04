@@ -14,7 +14,7 @@ build==1.2.2.post1
 cachetools==5.5.2
 certifi==2025.1.31
 charset-normalizer==3.4.1
-chroma-hnswlib==0.7.6
+# chroma-hnswlib==0.7.6
 chromadb==0.6.3
 click==8.1.8
 colorama==0.4.6
@@ -69,8 +69,10 @@ langchain==0.3.23
 langchain-chroma==0.2.2
 langchain-community==0.3.21
 langchain-core==0.3.51
+langchain-google-genai==2.0.8
 langchain-groq==0.3.2
 langchain-huggingface==0.1.2
+langchain-postgres==0.0.15
 langchain-text-splitters==0.3.8
 langsmith==0.3.30
 markdown-it-py==3.0.0
@@ -99,10 +101,10 @@ opentelemetry-util-http==0.53b0
 orjson==3.10.16
 overrides==7.7.0
 packaging==24.2
+pgvector==0.3.6
 pillow==11.1.0
-pinecone==6.0.2
-pinecone-plugin-interface==0.0.7
-pip==25.0
+# pinecone==6.0.2
+# pinecone-plugin-interface==0.0.7
 posthog==3.24.1
 propcache==0.3.1
 proto-plus==1.26.1
@@ -163,4 +165,3 @@ wheel==0.45.1
 wrapt==1.17.2
 yt_dlp
 zipp==3.21.0
-langchain-google-genai

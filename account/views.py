@@ -13,7 +13,8 @@ from .serializers import (
     UserChangePasswordSerializer,
     SendPasswordResetEmailSerializer,
 )
-import credentials
+import os
+from dotenv import load_dotenv
 from .utils import Util
 from google.oauth2 import id_token
 from google.auth.transport import requests
@@ -23,6 +24,8 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
 import time
+
+load_dotenv()
 
 User = get_user_model()  # This will get your custom User model
 
@@ -44,7 +47,7 @@ class UserRegistrationView(APIView):
             user = serializer.save()
             uid = urlsafe_base64_encode(force_bytes(str(user.id)))
             token = PasswordResetTokenGenerator().make_token(user)
-            domain = credentials.EMAIL_URL_DOMAIN
+            domain = os.getenv('EMAIL_URL_DOMAIN', 'http://localhost:3000/')
             link = domain + "verify-email/" + uid + "/" + token
 
             data = {

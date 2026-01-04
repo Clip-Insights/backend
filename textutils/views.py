@@ -10,23 +10,30 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 from collections import deque
-from langchain.output_parsers import PydanticOutputParser
-from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 from typing import List
 import time
 import yt_dlp
-from google.generativeai import GenerativeModel
-import google.generativeai as genai
-from groq import Groq
 from uuid import uuid4
 import re
+from groq import Groq
+from dotenv import load_dotenv
 
 from .models import VideoResource, VideoTranscriptTimeSlice, VideoTranscripts
-from .chroma_initialization import PINECONE_INDEX, EMBEDDING_MODEL, llm_client, transcription_client, TEXT_SPLITTER, get_llm, google_key_manager, groq_key_manager
+from .ai_config import (
+    get_llm,
+    EMBEDDING_MODEL,
+    TEXT_SPLITTER,
+    VECTOR_STORE
+)
+
+logger = logging.getLogger(__name__)
 from .utils import parse_keypoints, robust_json_parser, fix_pydantic_validation
 from .serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
-from credentials import CLIPINSIGHTS_PRODUCTION_KEY
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +41,26 @@ caching = True
 chat_memory_enabled = True
 chat_history = deque(maxlen=4)
 
-genai.configure(api_key=CLIPINSIGHTS_PRODUCTION_KEY)
+# Groq key rotation for transcription
+_groq_keys = None
+_groq_key_index = 0
+
+def _get_groq_client():
+    """Get Groq client with key rotation for audio transcription."""
+    global _groq_keys, _groq_key_index
+    
+    if _groq_keys is None:
+        keys_str = os.getenv("GROQ_API_KEYS", "")
+        if not keys_str:
+            raise ValueError("GROQ_API_KEYS not found in .env file")
+        _groq_keys = [k.strip() for k in keys_str.split(',') if k.strip()]
+    
+    if not _groq_keys:
+        raise ValueError("No valid Groq API keys found")
+    
+    key = _groq_keys[_groq_key_index]
+    _groq_key_index = (_groq_key_index + 1) % len(_groq_keys)
+    return Groq(api_key=key)
 
 class ChatView(APIView):
     def post(self, request, *args, **kwargs):
@@ -66,112 +92,56 @@ class ChatView(APIView):
                 )
                 transcript_entry.increment_access_count()
                 
-                embeddings_created = False
+                # Create chunks from transcription
+                chunks = TEXT_SPLITTER.split_text(transcription)
+                logger.info(f"Created {len(chunks)} chunks")
                 
-                if not created:
-                    previous_slice_time = transcript_entry.slice_time
-                    print(f"Previous slice_time: {previous_slice_time}, New slice_time: {slice_time}")
+                if len(chunks) == 0:
+                    logger.error("Warning: No chunks were created from the transcription!")
+                    return False
+                
+                # Prepare metadata for each chunk
+                metadatas = [
+                    {
+                        "youtube_url": youtube_url,
+                        "chunk_index": str(idx),
+                        "slice_time": str(slice_time),
+                    }
+                    for idx in range(len(chunks))
+                ]
+                
+                # Store embeddings in PGVector
+                VECTOR_STORE.add_texts(
+                    texts=chunks,
+                    metadatas=metadatas
+                )
+                logger.info("Embeddings stored successfully in PGVector.")
 
-                    if previous_slice_time == -1:
-                        print("Full transcript embeddings already exist. Skipping embedding creation.")
-                        return False
-                    if slice_time > previous_slice_time:
-                        print("New slice_time is greater than the previous one. Recreating embeddings.")
-                        embeddings_created = True
-                    elif previous_slice_time != -1 and slice_time == -1:
-                        print("Complete video transcription received. Recreating embeddings.")
-                        embeddings_created = True
-                    else:
-                        print("No changes in slice_time warrant embedding recreation. Skipping embedding creation.")
-                        return False
-                else:
-                    embeddings_created = True
-
-                if embeddings_created:
-                    print("Creating chunks and storing embeddings...")
-                    chunks = TEXT_SPLITTER.split_text(transcription)
-                    print(f"Created {len(chunks)} chunks")
-                    
-                    if len(chunks) == 0:
-                        print("Warning: No chunks were created from the transcription!")
-                        return False
-                    
-                    ids = [f"{youtube_url}_chunk_{idx}" for idx in range(len(chunks))]
-                    metadatas = [
-                        {
-                            "youtube_url": youtube_url,
-                            "chunk_index": str(idx),
-                            "slice_time": slice_time,
-                            "text": chunks[idx]
-                        }
-                        for idx in range(len(chunks))
-                    ]
-                    
-                    print("Creating embeddings...")
-                    embeddings = EMBEDDING_MODEL.embed_documents(chunks)
-                    
-                    if len(embeddings) == 0 or len(embeddings) != len(chunks):
-                        print(f"Warning: Expected {len(chunks)} embeddings, got {len(embeddings)}")
-                        return False
-                    
-                    vectors = [
-                        {
-                            "id": ids[i],
-                            "values": embeddings[i],
-                            "metadata": metadatas[i]
-                        }
-                        for i in range(len(chunks))
-                    ]
-                    
-                    print("Storing embeddings...")
-                    PINECONE_INDEX.upsert(vectors=vectors)
-                    print("Embeddings stored successfully.")
-
-                    transcript_entry.slice_time = slice_time
-                    transcript_entry.save()
-                    time.sleep(1)
-                    return True
-                    
-                return False
+                transcript_entry.slice_time = slice_time
+                transcript_entry.save()
+                return True
 
             except Exception as e:
-                print(f"Error during transcription and embedding storage: {e}")
+                logger.error(f"Error during transcription and embedding storage: {e}")
                 raise
             
         def generate_streaming_response():
             try:
-                embeddings_updated = process_transcription_and_store_embeddings()
-                query_embedding = EMBEDDING_MODEL.embed_query(user_query)
+                process_transcription_and_store_embeddings()
                 
-                relevant_docs = None
-                max_retries = 3
-                retry_delay = 1
+                # Retrieve relevant documents using similarity search
+                relevant_docs = VECTOR_STORE.similarity_search(
+                    query=user_query,
+                    k=3,
+                    filter={"youtube_url": youtube_url}
+                )
                 
-                for attempt in range(max_retries):
-                    relevant_docs = PINECONE_INDEX.query(
-                        vector=query_embedding,
-                        filter={"youtube_url": youtube_url},
-                        top_k=3,
-                        include_metadata=True
-                    )
-                    
-                    if relevant_docs and relevant_docs.matches and len(relevant_docs.matches) > 0:
-                        print(f"Retrieved {len(relevant_docs.matches)} relevant documents on attempt {attempt+1}")
-                        break
-                    else:
-                        print(f"No relevant documents found on attempt {attempt+1}")
-                        if attempt < max_retries - 1:
-                            print(f"Waiting {retry_delay}s before retry...")
-                            time.sleep(retry_delay)
-                            retry_delay *= 2
-                
-                if not relevant_docs or not relevant_docs.matches or len(relevant_docs.matches) == 0:
-                    print("Warning: Failed to retrieve relevant documents after all retries!")
-                    context = transcription[:10000]
-                    yield f"data:\n\n"
+                if not relevant_docs:
+                    logger.info("No relevant documents found, using truncated transcription")
+                    context = transcription[:1000]
                 else:
-                    context = "\n\n".join(match.metadata["text"] for match in relevant_docs.matches)
-                    print(f"Context length: {len(context)} characters")
+                    context = "\n\n".join(doc.page_content for doc in relevant_docs)
+                    logger.info(f"Retrieved {len(relevant_docs)} documents, context length: {len(context)} characters")
                 
                 if chat_memory_enabled and chat_history:
                     chat_context = "\n".join([
@@ -203,7 +173,7 @@ class ChatView(APIView):
                 yield "data: [DONE]\n\n"
 
             except Exception as e:
-                print(f"Error during chat streaming: {e}")
+                logger.error(f"Error during chat streaming: {e}")
                 yield f"data: Something went wrong\n\n"
 
         if stream_mode:
@@ -217,7 +187,7 @@ class ChatView(APIView):
             else:
                 response['Access-Control-Allow-Origin'] = 'https://www.youtube.com'
             response['Access-Control-Allow-Credentials'] = 'true'
-            print(response.headers)
+            logger.info(f"Response headers: {response.headers}")
             return response
         else:
             try:
@@ -227,7 +197,7 @@ class ChatView(APIView):
                     status=status.HTTP_200_OK
                 )
             except Exception as e:
-                print(f"Failed to process chat: {str(e)}")
+                logger.error(f"Failed to process chat: {str(e)}")
                 return Response(
                     {"error": f"Something went wrong"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -276,9 +246,9 @@ class SummaryView(APIView):
 
         youtube_url = validated_data.get('youtube_url')
         transcript = validated_data.get('transcription')
-        print("Transcript:>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", transcript)
+        logger.info(f"Transcript: {transcript}")
         slice_time = validated_data.get('slice_time', -1)
-        print("Tokens", len(transcript) // 3.5)
+        logger.info(f"Tokens: {len(transcript) // 3.5}")
         if not youtube_url:
             return Response(
                 {'youtube_url': ['This field is required.']},
@@ -292,8 +262,12 @@ class SummaryView(APIView):
             )
 
         response_data = {}
+        success = False
+        summary = None
+        keypoints = None
 
         try:
+            # Check cache first
             if caching:
                 video_resource = VideoResource.objects.filter(youtube_url=youtube_url).first()
                 if video_resource:
@@ -311,14 +285,14 @@ class SummaryView(APIView):
                         'slice_time': video_resource.slice_time,
                         'view_count': video_resource.view_count
                     }
-                    print("Retrieved from cache")
+                    logger.info("Retrieved from cache")
                     success = True
                     summary = None
                     keypoints = None
                     return JsonResponse(response_data, status=status.HTTP_200_OK)
 
             response = self._get_summary_keypoints(transcript)
-            print("Response:>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", response)
+            logger.info(f"Response: {response}")
             success = response["success"]
             if success:
                 summary = response["data"]["summary"]
@@ -349,7 +323,7 @@ class SummaryView(APIView):
             if caching == True and success == True:
                 try:
                     if summary and keypoints:
-                        print("storing in database")
+                        logger.info("storing in database")
                         VideoResource.objects.create(
                             youtube_url=youtube_url,
                             summary=summary,
@@ -359,31 +333,25 @@ class SummaryView(APIView):
                         )
                         
                 except Exception as db_error:
-                    print(f"Database Error: {db_error}")
+                    logger.error(f"Database Error: {db_error}")
 
     def _get_summary_keypoints(self, transcript):
         try:
             formatted_prompt = self.prompt_template.format(transcript=transcript)
-            genai.configure(api_key=google_key_manager.get_next_key())
-            print("API Key:>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", google_key_manager.get_next_key())
-            response = llm_client.generate_content(
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "text": f"You are an advanced summarization and keypoints extract assistant. Your task is to generate a structured summary and key points from a provided video transcript. Focus on capturing the **core message**, important events, and any key takeaways in a **concise, well-structured, and professional** manner. Always respond in **English language** even if the context is in some other language. Ensure the response is strictly in the required JSON format with only 2 fields: 'summary' and 'keypoints'.\n\n{formatted_prompt}"
-                            }
-                        ]
-                    }
-                ],
-                generation_config={
-                    "temperature": 0,
-                    "response_mime_type": "application/json"
-                }
-            )
             
-            response_text = response.text
+            # Get LLM with key rotation
+            llm = get_llm(streaming=False, temperature=0)
+            
+            system_message = "You are an advanced summarization and keypoints extract assistant. Your task is to generate a structured summary and key points from a provided video transcript. Focus on capturing the **core message**, important events, and any key takeaways in a **concise, well-structured, and professional** manner. Always respond in **English language** even if the context is in some other language. Ensure the response is strictly in the required JSON format with only 2 fields: 'summary' and 'keypoints'."
+            
+            full_prompt = f"{system_message}\n\n{formatted_prompt}"
+            
+            logger.info("Using LLM with key rotation for summary generation")
+            
+            # Invoke LLM using LangChain interface
+            response = llm.invoke(full_prompt)
+            
+            response_text = response.content
             parsed_response = fix_pydantic_validation(response_text)
             
             if parsed_response is None:
@@ -408,7 +376,7 @@ class SummaryView(APIView):
 
 class TokenLimitView(APIView):
     def get(self, request):
-        return JsonResponse({"tokens": 20000, "charPerToken": 3}, status=status.HTTP_200_OK)
+        return JsonResponse({"tokens": 2000, "charPerToken": 3}, status=status.HTTP_200_OK)
 
 def yt_dlp_download(yt_url: str, output_path: str = None, duration: int = 300) -> str:
     if output_path is None:
@@ -503,6 +471,10 @@ class TranscribeView(APIView):
             logger.info(f"Audio downloaded to: {downloaded_file_path}")
 
             logger.info(f"Starting transcription for: {downloaded_file_path}")
+            
+            # Get Groq client with key rotation for transcription
+            transcription_client = _get_groq_client()
+            
             with open(downloaded_file_path, 'rb') as audio_file:
                 transcription = transcription_client.audio.transcriptions.create(
                     file=(os.path.basename(downloaded_file_path), audio_file),

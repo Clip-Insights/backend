@@ -2,7 +2,10 @@ import os
 import jwt
 import uuid
 import boto3
-import credentials
+import logging
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 from django.db.models import Q
 from django.conf import settings
 from django.utils.timezone import now
@@ -16,8 +19,17 @@ from .models import File, Folder
 from .serializers import FileSerializer, FolderSerializer
 from account.models import User
 from botocore.exceptions import ClientError
-from credentials import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_STORAGE_BUCKET_NAME
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from botocore.client import Config
+
+load_dotenv()
+
+# Load AWS credentials from environment
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+AWS_REGION = os.getenv('AWS_REGION')
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
+AWS_S3_ENDPOINT_URL = f"https://s3.{AWS_REGION}.backblazeb2.com"
 
 class FileAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser, JSONParser)
@@ -26,23 +38,23 @@ class FileAPIView(APIView):
     def __init__(self):
         super().__init__()
         self.s3_client = boto3.client(
-            "s3",
-            aws_access_key_id=credentials.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=credentials.AWS_SECRET_ACCESS_KEY,
-            region_name=credentials.AWS_REGION,
+            service_name="s3",
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
+            endpoint_url=AWS_S3_ENDPOINT_URL,
+            config=Config(signature_version="s3v4"),
         )
 
     def get_user_id(self, request):
         """Extract user ID from JWT token."""
         user_token = request.headers.get("Authorization")
-        print("User Token:", user_token)
         if not user_token:
             return None, Response(
                 {"error": "Authorization token is missing"}, status=status.HTTP_401_UNAUTHORIZED
             )
         try:
             payload = jwt.decode(user_token.split(" ")[1], settings.SECRET_KEY, algorithms=["HS256"])
-            print("Payload:", payload)
             return payload["user_id"], None
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, KeyError):
             return None, Response(
@@ -97,9 +109,9 @@ class FileAPIView(APIView):
         try:
             self.s3_client.upload_fileobj(
                 file, AWS_STORAGE_BUCKET_NAME, s3_key,
-                ExtraArgs={"ContentType": "application/pdf", "ACL": "public-read"}
+                ExtraArgs={"ContentType": "application/pdf"}
             )
-            s3_url = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+            s3_url = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_REGION}.backblazeb2.com/{s3_key}"
             file_obj = File.objects.create(
                 user_id=user_id, path=s3_url, name=filename, size=file.size, created_date=now()
             )
@@ -200,9 +212,9 @@ class FolderAPIView(APIView):
         super().__init__()
         self.s3_client = boto3.client(
             "s3",
-            aws_access_key_id=credentials.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=credentials.AWS_SECRET_ACCESS_KEY,
-            region_name=credentials.AWS_REGION,
+            aws_access_key_id=AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+            region_name=AWS_REGION,
         )
 
     def get(self, request):
@@ -503,7 +515,7 @@ class StorageInfoAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        print("Inside storage info view")
+        logger.info("Inside storage info view")
         user_token = request.headers.get("Authorization")
         if not user_token:
             return Response(
@@ -531,7 +543,7 @@ class StorageInfoAPIView(APIView):
             "allowed_space": allowed_space,
             "message": "success",
         }
-        print("Storage info", data)
+        logger.info(f"Storage info: {data}")
         return Response(data, status=status.HTTP_200_OK)
 
 
@@ -601,7 +613,7 @@ class MoveFileAPIView(APIView):
 
 class FolderFilesAPIView(APIView):
     def get(self, request):
-        print("API HIT")
+        logger.info("API HIT")
         # Retrieve the Authorization token from headers
         user_token = request.headers.get("Authorization")
         if not user_token:
@@ -625,7 +637,7 @@ class FolderFilesAPIView(APIView):
 
         # Validate folder existence and ownership
         folder = Folder.objects.filter(user_id=user_id, id=folder_id).first()
-        print(folder)
+        logger.info(f"Folder: {folder}")
 
         if not folder:
             return Response(
