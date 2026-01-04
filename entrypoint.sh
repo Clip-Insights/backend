@@ -16,4 +16,4 @@ uv run python manage.py collectstatic --noinput
 # We default to 8080 if the variable is missing.
 echo "🔥 Starting Uvicorn on 0.0.0.0:${PORT:-8080}..."
 
-exec uv run uvicorn clip_insights_be.asgi:application --host 0.0.0.0 --port ${PORT:-8080} --workers 1
+exec uv run uvicorn core.asgi:application --host 0.0.0.0 --port ${PORT:-8080} --workers 1
