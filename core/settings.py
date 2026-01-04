@@ -122,12 +122,15 @@ CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins (not recommended for producti
 # Database
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django_cockroachdb",
         "NAME": os.getenv("DATABASE_NAME", ""),
         "USER": os.getenv("DATABASE_USER", ""),
         "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
         "HOST": os.getenv("DATABASE_HOST", ""),
         "PORT": os.getenv("DATABASE_PORT", ""),
+        'OPTIONS': {
+            'sslmode': 'verify-full',
+        }
     }
 }
 
