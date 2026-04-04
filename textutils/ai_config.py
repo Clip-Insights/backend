@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_postgres.vectorstores import PGVector
+from utils.cockroachdb_vectorstore import CockroachVectorStore
 
 # Load environment variables
 load_dotenv()
@@ -34,7 +34,7 @@ DB_HOST = os.getenv("DATABASE_HOST", "localhost")
 DB_PORT = os.getenv("DATABASE_PORT", "5432")
 DB_CERT_PATH = os.getenv("DATABASE_CERT_PATH", "")
 
-CONNECTION_STRING = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=verify-full&sslrootcert={DB_CERT_PATH}"
+CONNECTION_STRING = f"cockroachdb+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=verify-full&sslrootcert={DB_CERT_PATH}"
 
 
 class APIKeyManager:
@@ -139,7 +139,7 @@ def get_text_splitter() -> RecursiveCharacterTextSplitter:
 def get_vector_store(
     collection_name: str = "video_transcripts",
     embedding_model: Optional[HuggingFaceEmbeddings] = None
-) -> PGVector:
+) -> CockroachVectorStore:
     """
     Get or create PGVector store for embeddings.
     
@@ -154,16 +154,16 @@ def get_vector_store(
         embedding_model = get_embedding_model()
     
     try:
-        vectorstore = PGVector(
+        vectorstore = CockroachVectorStore(
             embeddings=embedding_model,
             collection_name=collection_name,
             connection=CONNECTION_STRING,
             use_jsonb=True,
         )
-        logger.info(f"✓ PGVector store initialized: {collection_name}")
+        logger.info(f"✓ CockroachVector store initialized: {collection_name}")
         return vectorstore
     except Exception as e:
-        logger.info(f"✗ Failed to initialize PGVector store: {e}")
+        logger.info(f"✗ Failed to initialize CockroachVector store: {e}")
         raise
 
 

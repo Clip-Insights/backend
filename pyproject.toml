@@ -27,6 +27,8 @@ dependencies = [
     "torch>=2.9.1",
     "django-cockroachdb>=6.0",
     "uvicorn>=0.40.0",
+    "sqlalchemy-cockroachdb>=2.0.3",
+    "langchain-community>=0.4.1",
 ]
 
 [[tool.uv.index]]
