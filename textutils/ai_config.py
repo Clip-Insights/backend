@@ -19,8 +19,8 @@ from utils.cockroachdb_vectorstore import CockroachVectorStore
 # Load environment variables
 load_dotenv()
 
-# Configuration Constants
-EMBEDDINGS_DIR = os.path.join(os.getcwd(), 'textutils', 'embeddings')
+# Configuration Constants - Updated for pre-baked models
+EMBEDDINGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'embeddings')
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 50
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
@@ -32,7 +32,7 @@ DB_USER = os.getenv("DATABASE_USER", "postgres")
 DB_PASSWORD = os.getenv("DATABASE_PASSWORD", "root")
 DB_HOST = os.getenv("DATABASE_HOST", "localhost")
 DB_PORT = os.getenv("DATABASE_PORT", "5432")
-DB_CERT_PATH = os.getenv("DATABASE_CERT_PATH", "")
+DB_CERT_PATH = os.getenv("DATABASE_CERT_PATH", "/root/.postgresql/root.crt")
 
 CONNECTION_STRING = f"cockroachdb+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=verify-full&sslrootcert={DB_CERT_PATH}"
 
@@ -100,9 +100,11 @@ def get_llm(streaming: bool = True, temperature: Optional[float] = None) -> Chat
         streaming=streaming
     )
 
+
 def get_embedding_model(model_name: str = 'all-MiniLM-L6-v2') -> HuggingFaceEmbeddings:
     """
-    Get or download HuggingFace embedding model.
+    Get pre-baked HuggingFace embedding model.
+    Optimized for Cloud Run - assumes model is pre-baked into container.
     
     Args:
         model_name: Name of the HuggingFace model (default: all-MiniLM-L6-v2)
@@ -110,17 +112,24 @@ def get_embedding_model(model_name: str = 'all-MiniLM-L6-v2') -> HuggingFaceEmbe
     Returns:
         HuggingFaceEmbeddings instance
     """
-    os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
     model_path = os.path.join(EMBEDDINGS_DIR, model_name)
     
     if os.path.exists(model_path):
-        logger.info(f"✓ Loading embeddings from: {model_path}")
+        logger.info(f"✓ Loading pre-baked embeddings from: {model_path}")
         return HuggingFaceEmbeddings(model_name=model_path)
     else:
-        logger.info(f"⬇ Downloading embeddings: {model_name}")
-        embeddings = HuggingFaceEmbeddings(model_name=model_name)
-        embeddings._client.save_pretrained(model_path)
-        return embeddings
+        # Fallback: Try loading from HuggingFace cache (also pre-baked)
+        cache_path = os.path.expanduser("~/.cache/huggingface")
+        if os.path.exists(cache_path):
+            logger.info(f"✓ Loading from HuggingFace cache: {cache_path}")
+            return HuggingFaceEmbeddings(model_name=model_name)
+        else:
+            # Last resort: Download at runtime (should not happen in production)
+            logger.warning(f"⚠️ Model not found at {model_path}, downloading...")
+            os.makedirs(EMBEDDINGS_DIR, exist_ok=True)
+            embeddings = HuggingFaceEmbeddings(model_name=model_name)
+            embeddings._client.save_pretrained(model_path)
+            return embeddings
 
 
 def get_text_splitter() -> RecursiveCharacterTextSplitter:
