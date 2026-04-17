@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 echo "🚀 Starting Application..."
@@ -13,10 +13,11 @@ else
 fi
 
 # Verify CockroachDB certificate
-if [ -f "/app/root.crt" ]; then
+DB_CERT_PATH="${DATABASE_CERT_PATH:-/root/.postgresql/root.crt}"
+if [ -f "$DB_CERT_PATH" ]; then
     echo "✅ CockroachDB certificate found"
 else
-    echo "❌ Error: CockroachDB certificate not found at /app/root.crt"
+    echo "❌ Error: CockroachDB certificate not found at $DB_CERT_PATH"
     exit 1
 fi
 

@@ -32,7 +32,7 @@ DB_USER = os.getenv("DATABASE_USER", "postgres")
 DB_PASSWORD = os.getenv("DATABASE_PASSWORD", "root")
 DB_HOST = os.getenv("DATABASE_HOST", "localhost")
 DB_PORT = os.getenv("DATABASE_PORT", "5432")
-DB_CERT_PATH = os.getenv("DATABASE_CERT_PATH", "/app/root.crt")
+DB_CERT_PATH = os.getenv("DATABASE_CERT_PATH", "/root/.postgresql/root.crt")
 
 CONNECTION_STRING = f"cockroachdb+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode=verify-full&sslrootcert={DB_CERT_PATH}"
 

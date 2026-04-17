@@ -48,7 +48,7 @@ os.environ['HF_HOME'] = '/model-cache'; \
 from sentence_transformers import SentenceTransformer; \
 model = SentenceTransformer('${EMBEDDING_MODEL_NAME}', revision='${EMBEDDING_MODEL_REVISION}'); \
 model.save('/model-cache/${EMBEDDING_MODEL_NAME}'); \
-print(f'Model {EMBEDDING_MODEL_NAME} downloaded and saved successfully'); \
+print('Model ${EMBEDDING_MODEL_NAME} downloaded and saved successfully'); \
 "
 
 # Verify model files exist
@@ -73,7 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Download CockroachDB certificate
-RUN curl --create-dirs -o /app/root.crt \
+RUN curl --create-dirs -o /root/.postgresql/root.crt \
     "https://cockroachlabs.cloud/clusters/8b06e7de-f0ef-468b-a189-5914654f3c10/cert"
 
 # Install uv
@@ -115,7 +115,7 @@ COPY --from=app-deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy CockroachDB certificate
-COPY --from=app-deps /app/root.crt /app/root.crt
+COPY --from=app-deps /root/.postgresql/root.crt /root/.postgresql/root.crt
 
 # KEY OPTIMIZATION: Copy pre-baked model from isolated stage
 # This creates a deterministic, cacheable layer
@@ -141,7 +141,7 @@ EXPOSE ${PORT:-8080}
 
 # Health check for Cloud Run
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8080}/health/ || exit 1
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\", \"8080\")}/health/', timeout=3)" || exit 1
 
 # Use entrypoint
 CMD ["/app/entrypoint.sh"]
