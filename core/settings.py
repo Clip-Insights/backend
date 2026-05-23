@@ -98,10 +98,7 @@ CORS_ALLOW_ALL_ORIGINS = True  # Allow all origins (not recommended for producti
 #     "https://youtube.com",
 #     "http://www.youtube.com",
 #     "https://www.youtube.com",
-#     "http://app.clipinsights.com",
-#     "https://app.clipinsights.com",
-#     "http://www.app.clipinsights.com",
-#     "https://www.app.clipinsights.com",
+#     "https://clipinsights.vercel.app",
 # ]
 
 # Database
