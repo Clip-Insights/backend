@@ -26,7 +26,8 @@ from .ai_config import (
     get_llm,
     EMBEDDING_MODEL,
     TEXT_SPLITTER,
-    VECTOR_STORE
+    VECTOR_STORE,
+    LLM_MAX_OUTPUT_TOKENS
 )
 
 logger = logging.getLogger(__name__)
@@ -376,7 +377,7 @@ class SummaryView(APIView):
 
 class TokenLimitView(APIView):
     def get(self, request):
-        return JsonResponse({"tokens": 2000, "charPerToken": 3}, status=status.HTTP_200_OK)
+        return JsonResponse({"tokens": LLM_MAX_OUTPUT_TOKENS, "charPerToken": 3}, status=status.HTTP_200_OK)
 
 def yt_dlp_download(yt_url: str, output_path: str = None, duration: int = 300) -> str:
     if output_path is None:

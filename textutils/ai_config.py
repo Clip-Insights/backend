@@ -25,6 +25,7 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 50
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
+LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8000"))
 
 # Database Configuration for PGVector
 DB_NAME = os.getenv("DATABASE_NAME", "clipinsights")
@@ -97,7 +98,8 @@ def get_llm(streaming: bool = True, temperature: Optional[float] = None) -> Chat
         model=LLM_MODEL,
         google_api_key=api_key,
         temperature=temp,
-        streaming=streaming
+        streaming=streaming,
+        max_output_tokens=LLM_MAX_OUTPUT_TOKENS
     )
 
 
@@ -198,4 +200,5 @@ __all__ = [
     'TEXT_SPLITTER',
     'VECTOR_STORE',
     'CONNECTION_STRING',
+    'LLM_MAX_OUTPUT_TOKENS',
 ]

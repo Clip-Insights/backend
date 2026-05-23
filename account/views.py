@@ -45,6 +45,20 @@ class UserRegistrationView(APIView):
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid(raise_exception=True):
             user = serializer.save()
+
+            if settings.ENVIRONMENT != "production":
+                user.is_verified = True
+                user.is_active = True
+                user.save(update_fields=["is_verified", "is_active", "updated_at"])
+                token = get_tokens_for_user(user)
+                return Response(
+                    {
+                        'token': token,
+                        'msg': 'Registration Successful. Account verified automatically',
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+
             uid = urlsafe_base64_encode(force_bytes(str(user.id)))
             token = PasswordResetTokenGenerator().make_token(user)
             domain = os.getenv('EMAIL_URL_DOMAIN', 'http://localhost:3000/')

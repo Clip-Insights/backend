@@ -135,5 +135,5 @@ class TokenLimitViewTests(APITestCase):
         response = self.client.get(self.url, format='json')
         self.assertEqual(
             response.json(), {
-                "tokens": 50000, "charPerToken": 2.5}
+                "tokens": 8000, "charPerToken": 3}
         )
