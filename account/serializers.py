@@ -1,3 +1,4 @@
+import logging
 import os
 from dotenv import load_dotenv
 from .utils import Util
@@ -8,6 +9,8 @@ from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -73,7 +76,19 @@ class SendPasswordResetEmailSerializer(serializers.Serializer):
                 "username": user.name,
                 "to_email": user.email,
             }
-            Util.send_email(data)
+            try:
+                Util.send_email(data)
+            except Exception as exc:
+                # Don't leak SMTP internals to the client, but log the real
+                # server response (e.g. the SMTPAuthenticationError code) so
+                # the cause is visible in Cloud Run logs.
+                logger.error(
+                    "Failed to send password reset email to %s: %s", email, exc
+                )
+                raise serializers.ValidationError(
+                    "Unable to send the password reset email right now. "
+                    "Please try again later."
+                )
             return attrs
         else:
             raise serializers.ValidationError("You are not a Registered User")
