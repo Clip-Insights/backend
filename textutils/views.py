@@ -24,7 +24,6 @@ from dotenv import load_dotenv
 from .models import VideoResource, VideoTranscriptTimeSlice, VideoTranscripts
 from .ai_config import (
     get_llm,
-    EMBEDDING_MODEL,
     TEXT_SPLITTER,
     VECTOR_STORE,
     LLM_MAX_OUTPUT_TOKENS

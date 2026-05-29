@@ -30,4 +30,5 @@ exec uvicorn core.asgi:application \
     --port ${PORT:-8080} \
     --workers 1 \
     --timeout-keep-alive 300 \
-    --log-level info
+    --timeout-graceful-shutdown 10 \
+    --log-level warning
