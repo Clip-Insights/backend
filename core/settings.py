@@ -191,12 +191,12 @@ SIMPLE_JWT = {
 # Email Configuration
 
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "mail.clipinsights.com"
-EMAIL_PORT = 465
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", 587))
 EMAIL_HOST_USER = os.getenv("EMAIL_USERNAME")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_PASSWORD")
-EMAIL_USE_TLS = False
-EMAIL_USE_SSL = True
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
 PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Saving Backend Logs
