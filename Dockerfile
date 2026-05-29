@@ -43,14 +43,7 @@ RUN uv pip install --no-cache-dir \
 
 # KEY OPTIMIZATION: Download model with pinned version
 # This layer is ONLY rebuilt when EMBEDDING_MODEL_NAME or REVISION changes
-RUN python -c " \
-import os; \
-os.environ['HF_HOME'] = '/model-cache'; \
-from sentence_transformers import SentenceTransformer; \
-model = SentenceTransformer('${EMBEDDING_MODEL_NAME}', revision='${EMBEDDING_MODEL_REVISION}'); \
-model.save('/model-cache/${EMBEDDING_MODEL_NAME}'); \
-print('Model ${EMBEDDING_MODEL_NAME} downloaded and saved successfully'); \
-"
+RUN python -c "import os; os.environ['HF_HOME'] = '/model-cache'; from sentence_transformers import SentenceTransformer; model = SentenceTransformer('${EMBEDDING_MODEL_NAME}', revision='${EMBEDDING_MODEL_REVISION}'); model.save('/model-cache/${EMBEDDING_MODEL_NAME}'); print('Model ${EMBEDDING_MODEL_NAME} downloaded and saved successfully')"
 
 # Verify model files exist
 RUN test -d /model-cache/${EMBEDDING_MODEL_NAME} && \
