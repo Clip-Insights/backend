@@ -35,8 +35,9 @@ ENV PATH="/model-venv/bin:$PATH"
 # Install ONLY the packages needed for model download
 # This layer is cached unless the ARG values change
 RUN uv pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
     sentence-transformers>=5.2.0 \
-    torch>=2.9.1 --index-url https://download.pytorch.org/whl/cpu \
+    torch>=2.9.1 \
     transformers>=4.51.2 \
     huggingface-hub>=0.30.2
 
