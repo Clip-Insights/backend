@@ -1,0 +1,6 @@
+from typing import Any, Protocol
+
+
+class VectorStoreProvider(Protocol):
+    def add_texts(self, texts: list[str], metadatas: list[dict]) -> None: ...
+    def similarity_search(self, query: str, k: int, filter: dict | None = None) -> list[Any]: ...

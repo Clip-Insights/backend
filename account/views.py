@@ -16,14 +16,11 @@ from .serializers import (
 import os
 from dotenv import load_dotenv
 from .utils import Util
-from google.oauth2 import id_token
-from google.auth.transport import requests
 from google.auth.exceptions import TransportError
-from django.conf import settings
+from integrations.registry import get_oauth
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
-import time
 
 load_dotenv()
 
@@ -176,27 +173,8 @@ class GoogleLoginView(APIView):
             if not token:
                 return Response({'error': 'Token is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Add retry mechanism
-            max_retries = 3
-            retry_delay = 1  # seconds
-            idinfo = None
-            
-            for attempt in range(max_retries):
-                try:
-                    idinfo = id_token.verify_oauth2_token(
-                        token, 
-                        requests.Request(), 
-                        settings.GOOGLE_CLIENT_ID
-                    )
-                    break
-                except TransportError as e:
-                    if attempt == max_retries - 1:
-                        raise
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-
-            # Check if user exists
-            email = idinfo['email']
+            idinfo = get_oauth().verify(token)
+            email = idinfo["email"]
             try:
                 user = User.objects.get(email=email)
             except User.DoesNotExist:

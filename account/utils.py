@@ -1,7 +1,6 @@
 import logging
 
-from django.conf import settings
-from django.core.mail import EmailMessage
+from integrations.registry import get_email
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +30,7 @@ If you did not make this request, no action is needed. Please note that this lin
 Best regards,
 The ClipInsights Team
 """
-        # Gmail (and most providers) require the From address to be the
-        # authenticated account or a verified alias. Falls back to the SMTP
-        # login user so it can never drift from the credentials in use.
-        from_email = settings.DEFAULT_FROM_EMAIL or settings.EMAIL_HOST_USER
-        email = EmailMessage(
-            subject=data['subject'],
-            body=body,
-            from_email=from_email,
-            to=[data['to_email']]
-        )
-        email.send()
+        get_email().send(to=data["to_email"], subject=data["subject"], body=body)
 
 def convert_to_bytes(mbs):
     return mbs * 1024 * 1024

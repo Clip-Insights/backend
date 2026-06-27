@@ -3,17 +3,18 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+from core.views import health_check
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('api.urls')),
-    path('api/account/', include('account.urls')),
-    path('api/userspace/', include('userspace.urls')),
-    path('api/textutils/', include('textutils.urls')),
+    path("admin/", admin.site.urls),
+    path("health/", health_check),
+    path("api/videos/", include("videos.urls")),
+    path("api/files/", include("files.urls")),
+    path("api/account/", include("account.urls")),
+    # backward-compat aliases
+    path("api/textutils/", include("videos.urls")),
+    path("api/userspace/", include("files.urls")),
 ]
 
 if settings.DEBUG:
-    urlpatterns += static(
-        settings.MEDIA_URL,
-        document_root=settings.MEDIA_ROOT
-    )
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
