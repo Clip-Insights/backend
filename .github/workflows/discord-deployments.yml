@@ -1,0 +1,64 @@
+name: Discord — Deployments
+
+on:
+  push:
+    branches:
+      - main      # adjust to your production branch name
+      - staging   # remove this line if you don't have a staging branch
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "label=Production 🚀" >> $GITHUB_OUTPUT
+            echo "color=5763719" >> $GITHUB_OUTPUT   # green
+          else
+            echo "label=Staging 🔧" >> $GITHUB_OUTPUT
+            echo "color=16776960" >> $GITHUB_OUTPUT  # yellow
+          fi
+
+      - name: Post to Discord #deployments
+        run: |
+          # Shorten the commit SHA for display
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+
+          cat > /tmp/discord_payload.json << EOF
+          {
+            "embeds": [{
+              "title": "📦 Deploy pushed — ${{ steps.env.outputs.label }}",
+              "description": "${{ github.event.head_commit.message }}",
+              "url": "${COMMIT_URL}",
+              "color": ${{ steps.env.outputs.color }},
+              "fields": [
+                {
+                  "name": "Repo",
+                  "value": "${{ github.repository }}",
+                  "inline": true
+                },
+                {
+                  "name": "Pushed by",
+                  "value": "@${{ github.actor }}",
+                  "inline": true
+                },
+                {
+                  "name": "Commit",
+                  "value": "[\`${SHORT_SHA}\`](${COMMIT_URL})",
+                  "inline": true
+                }
+              ],
+              "footer": {
+                "text": "Branch: ${{ github.ref_name }}"
+              }
+            }]
+          }
+          EOF
+
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d @/tmp/discord_payload.json \
+            "${{ secrets.DISCORD_DEPLOYMENTS_WEBHOOK }}"
