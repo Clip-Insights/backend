@@ -4,7 +4,7 @@ set -e
 echo "🚀 Starting Application..."
 
 # Verify pre-baked model exists
-MODEL_PATH="/app/textutils/embeddings/all-MiniLM-L6-v2"
+MODEL_PATH="/app/videos/embeddings/all-MiniLM-L6-v2"
 if [ -d "$MODEL_PATH" ]; then
     echo "✅ Pre-baked embedding model found: $MODEL_PATH"
 else

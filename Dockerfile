@@ -93,9 +93,9 @@ ARG EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=core.settings \
-    HF_HOME=/app/textutils/embeddings \
-    TRANSFORMERS_CACHE=/app/textutils/embeddings \
-    SENTENCE_TRANSFORMERS_HOME=/app/textutils/embeddings
+    HF_HOME=/app/videos/embeddings \
+    TRANSFORMERS_CACHE=/app/videos/embeddings \
+    SENTENCE_TRANSFORMERS_HOME=/app/videos/embeddings
 
 # Install minimal runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -113,7 +113,7 @@ COPY --from=app-deps /root/.postgresql/root.crt /root/.postgresql/root.crt
 
 # KEY OPTIMIZATION: Copy pre-baked model from isolated stage
 # This creates a deterministic, cacheable layer
-COPY --from=model-downloader /model-cache/${EMBEDDING_MODEL_NAME} /app/textutils/embeddings/${EMBEDDING_MODEL_NAME}
+COPY --from=model-downloader /model-cache/${EMBEDDING_MODEL_NAME} /app/videos/embeddings/${EMBEDDING_MODEL_NAME}
 
 # Copy application code (this layer changes frequently - LAST)
 COPY . .
