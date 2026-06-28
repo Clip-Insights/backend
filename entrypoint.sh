@@ -3,15 +3,6 @@ set -e
 
 echo "🚀 Starting Application..."
 
-# Verify pre-baked model exists
-MODEL_PATH="/app/videos/embeddings/all-MiniLM-L6-v2"
-if [ -d "$MODEL_PATH" ]; then
-    echo "✅ Pre-baked embedding model found: $MODEL_PATH"
-else
-    echo "⚠️  Warning: Pre-baked model not found at $MODEL_PATH"
-    echo "   Model will be downloaded on first use (cold start impact)"
-fi
-
 # Verify CockroachDB certificate
 DB_CERT_PATH="${DATABASE_CERT_PATH:-/root/.postgresql/root.crt}"
 if [ -f "$DB_CERT_PATH" ]; then
