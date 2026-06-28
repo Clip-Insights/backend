@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 
 from integrations.registry import LLM_MAX_OUTPUT_TOKENS
 from videos.serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
-from videos.services.chat import build_chat_stream, process_chat_embeddings
+from videos.services.chat import build_chat_stream
 from videos.services.summarize import generate_summary
 from videos.services.transcribe import transcribe_youtube
 
@@ -25,8 +25,7 @@ class ChatView(APIView):
         youtube_url = validated_data.get("youtube_url")
         user_query = validated_data.get("query")
         transcription = validated_data.get("transcription")
-        slice_time = validated_data.get("slice_time", -1)
-        stream_mode = validated_data.get("stream", False)
+        chat_history = validated_data.get("chat_history", [])
 
         if not youtube_url or not user_query:
             return Response(
@@ -34,28 +33,20 @@ class ChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if stream_mode:
-            def generate_streaming_response():
-                try:
-                    yield from build_chat_stream(youtube_url, user_query, transcription, slice_time)
-                except Exception as e:
-                    logger.error("Error during chat streaming: %s", e)
-                    yield "data: Something went wrong\n\n"
+        def generate_streaming_response():
+            try:
+                yield from build_chat_stream(youtube_url, user_query, transcription, chat_history)
+            except Exception as e:
+                logger.error("Error during chat streaming: %s", e)
+                yield "data: Something went wrong\n\n"
 
-            response = StreamingHttpResponse(
-                generate_streaming_response(), content_type="text/event-stream"
-            )
-            origin = request.headers.get("Origin")
-            response["Access-Control-Allow-Origin"] = origin or "https://www.youtube.com"
-            response["Access-Control-Allow-Credentials"] = "true"
-            return response
-
-        try:
-            process_chat_embeddings(youtube_url, transcription, slice_time)
-            return Response({"message": "Data processed. Start streaming."}, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.error("Failed to process chat: %s", e)
-            return Response({"error": "Something went wrong"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        response = StreamingHttpResponse(
+            generate_streaming_response(), content_type="text/event-stream"
+        )
+        origin = request.headers.get("Origin")
+        response["Access-Control-Allow-Origin"] = origin or "https://www.youtube.com"
+        response["Access-Control-Allow-Credentials"] = "true"
+        return response
 
 
 class SummaryView(APIView):

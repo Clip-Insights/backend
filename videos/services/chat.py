@@ -1,88 +1,74 @@
 import logging
-from collections import deque
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from integrations.registry import get_llm, get_vectorstore
-from videos.models import VideoTranscriptTimeSlice
+from integrations.registry import get_embeddings, get_llm, get_vectorstore
+from videos.prompts import build_chat_prompt
+from videos.services.chunking import chunk_text
 
 logger = logging.getLogger(__name__)
 
-chat_memory_enabled = True
-chat_history: deque = deque(maxlen=4)
+# How many recent messages of history to carry into the prompt.
+CHAT_MEMORY_WINDOW = 3
+# How many transcript chunks to retrieve and feed the model per question.
+RETRIEVAL_K = 3
+# Below this length the "transcript" is almost certainly an error sentinel
+# (e.g. "Transcript not available"), so don't embed/store it.
+MIN_TRANSCRIPT_CHARS = 40
+# Bounded fallback context used only when retrieval itself fails.
+FALLBACK_CONTEXT_CHARS = 4000
 
-TEXT_SPLITTER = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=50)
+
+def _format_history(chat_history: list[dict]) -> str:
+    lines = []
+    for message in (chat_history or [])[-CHAT_MEMORY_WINDOW:]:
+        role = "User" if message.get("role") == "user" else "Assistant"
+        lines.append(f"{role}: {message.get('content', '')}")
+    return "\n".join(lines)
 
 
-def process_chat_embeddings(youtube_url: str, transcription: str, slice_time: int) -> bool:
+def _retrieve_context(youtube_url: str, transcription: str, user_query: str) -> str | None:
+    """Embed the transcript (once per video) and return the top-K chunks for the query.
+
+    Returns None if there is nothing usable to retrieve from or if the vector
+    store/embeddings fail — the caller then falls back to the raw transcript so
+    chat never breaks.
+    """
+    if not transcription or len(transcription.strip()) < MIN_TRANSCRIPT_CHARS:
+        return None
     try:
-        transcript_entry, _created = VideoTranscriptTimeSlice.objects.get_or_create(
-            youtube_url=youtube_url,
-            defaults={"slice_time": slice_time},
-        )
-        transcript_entry.increment_access_count()
+        store = get_vectorstore()
+        embeddings = get_embeddings()
 
-        chunks = TEXT_SPLITTER.split_text(transcription)
-        logger.info("Created %s chunks", len(chunks))
-        if not chunks:
-            logger.error("No chunks were created from the transcription!")
-            return False
+        if not store.has_video(youtube_url):
+            chunks = chunk_text(transcription)
+            if not chunks:
+                return None
+            store.add_video(youtube_url, chunks, embeddings.embed_documents(chunks))
 
-        metadatas = [
-            {
-                "youtube_url": youtube_url,
-                "chunk_index": str(idx),
-                "slice_time": str(slice_time),
-            }
-            for idx in range(len(chunks))
-        ]
-
-        get_vectorstore().add_texts(texts=chunks, metadatas=metadatas)
-        logger.info("Embeddings stored successfully.")
-
-        transcript_entry.slice_time = slice_time
-        transcript_entry.save()
-        return True
-    except Exception as e:
-        logger.error("Error during transcription and embedding storage: %s", e)
-        raise
+        query_vector = embeddings.embed_query(user_query)
+        documents = store.similarity_search(youtube_url, query_vector, RETRIEVAL_K)
+        return "\n\n".join(documents) if documents else None
+    except Exception as exc:
+        logger.warning("Vector retrieval failed (%s); falling back to transcript", exc)
+        return None
 
 
-def build_chat_stream(youtube_url: str, user_query: str, transcription: str, slice_time: int):
-    process_chat_embeddings(youtube_url, transcription, slice_time)
+def build_chat_stream(youtube_url: str, user_query: str, transcription: str, chat_history: list[dict] | None = None):
+    """Stream a conversational answer to `user_query`.
 
-    relevant_docs = get_vectorstore().similarity_search(
-        query=user_query, k=3, filter={"youtube_url": youtube_url}
+    Only the transcript chunks most relevant to the question are sent to the
+    model (retrieved from the vector store), together with the recent chat
+    history. If retrieval is unavailable, a bounded slice of the transcript is
+    used so the user still gets an answer.
+    """
+    context = _retrieve_context(youtube_url, transcription, user_query)
+    if context is None and transcription:
+        context = transcription[:FALLBACK_CONTEXT_CHARS]
+
+    prompt = build_chat_prompt(
+        history=_format_history(chat_history or []),
+        context=context or "",
+        query=user_query,
     )
-
-    if not relevant_docs:
-        logger.info("No relevant documents found, using truncated transcription")
-        context = transcription[:1000]
-    else:
-        context = "\n\n".join(doc.page_content for doc in relevant_docs)
-        logger.info("Retrieved %s documents", len(relevant_docs))
-
-    if chat_memory_enabled and chat_history:
-        chat_context = "\n".join([
-            f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}"
-            for msg in chat_history[-4:]
-        ])
-        prompt = f"""You are a helpful AI assistant answering questions about a video. 
-                    Previous conversation:
-                    {chat_context}
-                    
-                    Based on this context and the video content below, provide a concise answer (50-60 words) 
-                    to the user's latest question in english. Maintain conversation continuity while staying focused on the video content.
-                    
-                    Video Content: {context}
-                    
-                    User's Latest Question: {user_query}"""
-    else:
-        prompt = f"""Provide a concise answer to the user's question based on the video content. 
-                    Ensure the response is contextually accurate and in English.
-                    
-                    User Query: {user_query}
-                    Relevant Context: {context}"""
 
     for chunk in get_llm().stream(prompt):
         yield f"data: {chunk}\n\n"

@@ -1,70 +1,90 @@
+"""Tests for the videos app: API endpoints + the summarize/chat services.
+
+Runs under both `pytest` and `python manage.py test`. External LLM calls are
+patched so the suite is fast, deterministic and offline (FIRST principles).
+"""
+from unittest.mock import patch
+
 from django.urls import reverse
-from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from unittest.mock import patch, MagicMock
+from rest_framework.test import APIClient, APITestCase
+
+from videos.services.chat import _format_history, _retrieve_context, build_chat_stream
+from videos.services.chunking import chunk_text
+from videos.services.summarize import VideoSummary, generate_summary
 
 
 class DummyLLM:
+    """A stand-in LLM provider used wherever a test patches `get_llm`."""
+
     def stream(self, prompt, **kwargs):
-        yield "Test streaming content"
+        yield "Hello "
+        yield "world"
+
+    def structured(self, prompt, response_model, **kwargs):
+        return VideoSummary(summary="A concise summary.", keypoints=["Point 1", "Point 2"])
 
 
+# --------------------------------------------------------------------------- #
+# Chat endpoint
+# --------------------------------------------------------------------------- #
 class ChatViewTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse("chat")
 
-    @patch("videos.services.chat.get_vectorstore")
-    def test_chat_non_streaming(self, mock_vs):
-        mock_vs.return_value.add_texts = MagicMock()
-        payload = {
-            "youtube_url": "http://youtube.com/dummy",
-            "query": "What is this video about?",
-            "transcription": "Dummy transcription text.",
-            "slice_time": -1,
-            "stream": False,
-        }
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["message"], "Data processed. Start streaming.")
-
-    def test_chat_missing_fields(self):
+    def test_missing_fields_returns_400(self):
         response = self.client.post(self.url, {}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("videos.services.chat.get_llm", return_value=DummyLLM())
-    @patch("videos.services.chat.get_vectorstore")
-    def test_chat_streaming(self, mock_vs, mock_llm):
-        mock_vs.return_value.add_texts = MagicMock()
-        mock_vs.return_value.similarity_search.return_value = []
+    def test_streams_tokens_then_done(self, _mock_llm):
         payload = {
             "youtube_url": "http://youtube.com/dummy",
-            "query": "What is this video about?",
+            "query": "What is this about?",
             "transcription": "Dummy transcription text.",
-            "slice_time": -1,
-            "stream": True,
+            "chat_history": [],
         }
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn("data: Hello ", content)
+        self.assertIn("data: world", content)
         self.assertIn("[DONE]", content)
 
+    @patch("videos.services.chat.get_llm", return_value=DummyLLM())
+    def test_history_is_accepted(self, _mock_llm):
+        payload = {
+            "youtube_url": "http://youtube.com/dummy",
+            "query": "And then?",
+            "transcription": "Dummy transcription text.",
+            "chat_history": [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello"},
+            ],
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
+
+# --------------------------------------------------------------------------- #
+# Summary endpoint
+# --------------------------------------------------------------------------- #
 class SummaryViewTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse("summary")
 
-    @patch("videos.services.summarize.generate_summary")
-    def test_summary_success(self, mock_generate):
-        mock_generate.return_value = ({
-            "success": True,
-            "summary": "This is a dummy summary.",
-            "keypoints": ["Point 1", "Point 2"],
-            "message": "Success",
-            "youtube_url": "http://youtube.com/dummy",
-            "slice_time": -1,
-        }, 200)
+    def test_missing_youtube_url_returns_400(self):
+        response = self.client.post(self.url, {"transcription": "x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_transcription_returns_400(self):
+        response = self.client.post(self.url, {"youtube_url": "http://x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("videos.services.summarize.get_llm", return_value=DummyLLM())
+    def test_success_returns_summary_and_keypoints(self, _mock_llm):
         payload = {
             "youtube_url": "http://youtube.com/dummy",
             "transcription": "Dummy transcription text.",
@@ -73,14 +93,146 @@ class SummaryViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         data = response.json()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(data.get("summary"), "This is a dummy summary.")
+        self.assertTrue(data["success"])
+        self.assertEqual(data["summary"], "A concise summary.")
+        self.assertEqual(data["keypoints"], ["Point 1", "Point 2"])
+
+    @patch("videos.views.generate_summary", return_value=({"success": False, "error": "boom"}, 500))
+    def test_service_error_propagates_status(self, _mock):
+        payload = {"youtube_url": "http://x", "transcription": "t"}
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# --------------------------------------------------------------------------- #
+# Token-limit endpoint
+# --------------------------------------------------------------------------- #
 class TokenLimitViewTests(APITestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.url = reverse("tokenlimit")
+    def test_returns_tokens_and_char_per_token(self):
+        response = self.client.get(reverse("tokenlimit"), format="json")
+        data = response.json()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("tokens", data)
+        self.assertEqual(data["charPerToken"], 3)
 
-    def test_tokenlimit(self):
-        response = self.client.get(self.url, format="json")
-        self.assertIn("tokens", response.json())
+
+# --------------------------------------------------------------------------- #
+# Transcribe endpoint (input validation only — no network)
+# --------------------------------------------------------------------------- #
+class TranscribeViewTests(APITestCase):
+    def setUp(self):
+        self.url = reverse("transcribe")
+
+    def test_missing_url_returns_400(self):
+        response = self.client.post(self.url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_non_url_returns_400(self):
+        response = self.client.post(self.url, {"youtube_url": "not-a-url"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+# --------------------------------------------------------------------------- #
+# Service-level unit tests (no HTTP layer)
+# --------------------------------------------------------------------------- #
+class SummarizeServiceTests(APITestCase):
+    @patch("videos.services.summarize.get_llm", return_value=DummyLLM())
+    def test_generate_summary_returns_200_payload(self, _mock_llm):
+        data, code = generate_summary("http://x", "transcript", -1)
+        self.assertEqual(code, 200)
+        self.assertTrue(data["success"])
+        self.assertEqual(data["summary"], "A concise summary.")
+        self.assertEqual(data["slice_time"], -1)
+
+    def test_generate_summary_handles_provider_failure(self):
+        class Boom:
+            def structured(self, *a, **k):
+                raise RuntimeError("provider down")
+
+        with patch("videos.services.summarize.get_llm", return_value=Boom()):
+            data, code = generate_summary("http://x", "transcript", -1)
+        self.assertEqual(code, 500)
+        self.assertFalse(data["success"])
+        self.assertIn("error", data)
+
+
+class ChatServiceTests(APITestCase):
+    def test_format_history_keeps_last_window_and_labels_roles(self):
+        history = [{"role": "user", "content": f"m{i}"} for i in range(10)]
+        text = _format_history(history)
+        # Only the last CHAT_MEMORY_WINDOW (3) messages are kept: m7, m8, m9.
+        self.assertNotIn("m6", text)
+        self.assertIn("m7", text)
+        self.assertIn("m9", text)
+        self.assertTrue(text.startswith("User:"))
+
+    def test_format_history_empty(self):
+        self.assertEqual(_format_history([]), "")
+
+    @patch("videos.services.chat.get_llm", return_value=DummyLLM())
+    def test_build_chat_stream_emits_sse_and_done(self, _mock_llm):
+        chunks = list(build_chat_stream("http://x", "q", "transcript", []))
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+        self.assertTrue(any(c.startswith("data: ") for c in chunks[:-1]))
+
+
+# --------------------------------------------------------------------------- #
+# Chat retrieval (RAG) — embeddings + vector store
+# --------------------------------------------------------------------------- #
+class FakeEmbeddings:
+    def embed_documents(self, texts):
+        return [[float(len(t)), 0.0] for t in texts]
+
+    def embed_query(self, text):
+        return [1.0, 0.0]
+
+
+class FakeStore:
+    def __init__(self):
+        self.added = None
+
+    def has_video(self, url):
+        return False
+
+    def add_video(self, url, chunks, embeddings):
+        self.added = (url, chunks, embeddings)
+
+    def similarity_search(self, url, query_embedding, k):
+        return ["chunk-A", "chunk-B", "chunk-C"][:k]
+
+
+class ChatRetrievalTests(APITestCase):
+    TRANSCRIPT = "word " * 400  # long enough to chunk and to clear MIN_TRANSCRIPT_CHARS
+
+    @patch("videos.services.chat.get_vectorstore")
+    @patch("videos.services.chat.get_embeddings", return_value=FakeEmbeddings())
+    def test_retrieve_embeds_once_and_returns_topk(self, _emb, mock_store):
+        store = FakeStore()
+        mock_store.return_value = store
+
+        context = _retrieve_context("http://x", self.TRANSCRIPT, "what is this?")
+
+        self.assertEqual(context, "chunk-A\n\nchunk-B\n\nchunk-C")
+        self.assertIsNotNone(store.added)  # transcript was embedded + stored
+
+    def test_retrieve_skips_short_transcript(self):
+        self.assertIsNone(_retrieve_context("http://x", "too short", "q"))
+
+    @patch("videos.services.chat.get_embeddings", side_effect=RuntimeError("boom"))
+    def test_retrieve_returns_none_on_failure(self, _emb):
+        self.assertIsNone(_retrieve_context("http://x", self.TRANSCRIPT, "q"))
+
+    @patch("videos.services.chat.get_llm", return_value=DummyLLM())
+    @patch("videos.services.chat._retrieve_context", return_value=None)
+    def test_stream_falls_back_to_transcript_when_retrieval_unavailable(self, _ret, _llm):
+        chunks = list(build_chat_stream("http://x", "q", "some transcript", []))
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+
+    def test_chunk_text_overlaps_and_covers(self):
+        # size=4, overlap=1 -> step=3, windows start at 0,3,6 and stop once the
+        # window reaches the end (no tiny trailing chunk).
+        self.assertEqual(chunk_text("abcdefghij", size=4, overlap=1), ["abcd", "defg", "ghij"])
+
+    def test_chunk_text_short_returns_single(self):
+        self.assertEqual(chunk_text("short"), ["short"])
+        self.assertEqual(chunk_text("   "), [])

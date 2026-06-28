@@ -1,21 +1,37 @@
-class _MemoryDoc:
-    def __init__(self, page_content: str):
-        self.page_content = page_content
+"""In-process vector store: cosine similarity in pure Python.
+
+Used for tests and local runs without CockroachDB. Holds everything in a dict,
+so it is not shared across processes and is cleared on restart.
+"""
+from math import sqrt
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sqrt(sum(x * x for x in a))
+    norm_b = sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 class MemoryVectorStore:
-    def __init__(self):
-        self._docs: list[tuple[str, dict]] = []
+    def __init__(self) -> None:
+        self._videos: dict[str, list[tuple[str, list[float]]]] = {}
 
-    def add_texts(self, texts: list[str], metadatas: list[dict]) -> None:
-        for text, meta in zip(texts, metadatas):
-            self._docs.append((text, meta))
+    def has_video(self, youtube_url: str) -> bool:
+        return bool(self._videos.get(youtube_url))
 
-    def similarity_search(self, query: str, k: int, filter: dict | None = None):
-        filtered = self._docs
-        if filter:
-            filtered = [
-                (t, m) for t, m in self._docs
-                if all(str(m.get(fk)) == str(fv) for fk, fv in filter.items())
-            ]
-        return [_MemoryDoc(t) for t, _ in filtered[:k]]
+    def add_video(
+        self, youtube_url: str, chunks: list[str], embeddings: list[list[float]]
+    ) -> None:
+        self._videos[youtube_url] = list(zip(chunks, embeddings))
+
+    def similarity_search(
+        self, youtube_url: str, query_embedding: list[float], k: int
+    ) -> list[str]:
+        entries = self._videos.get(youtube_url, [])
+        ranked = sorted(
+            entries, key=lambda entry: _cosine_similarity(query_embedding, entry[1]), reverse=True
+        )
+        return [content for content, _ in ranked[:k]]

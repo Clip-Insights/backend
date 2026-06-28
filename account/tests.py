@@ -13,6 +13,11 @@ class AccountTests(APITestCase):
             name="Test User",
             password="testpassword123"
         )
+        # create_user makes an inactive, unverified user; activate it so login and
+        # JWT-authenticated endpoints work (Django/SimpleJWT reject inactive users).
+        self.user.is_active = True
+        self.user.is_verified = True
+        self.user.save(update_fields=["is_active", "is_verified"])
         self.login_url = "/api/account/login/"
         self.register_url = "/api/account/signup/"
         self.profile_url = "/api/account/profile/"

@@ -1,9 +1,8 @@
 import importlib
-import logging
 import os
 import threading
 
-logger = logging.getLogger(__name__)
+LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8000"))
 
 _PROVIDERS = {
     "llm": {
@@ -14,10 +13,11 @@ _PROVIDERS = {
         "groq": "integrations.transcription.groq_whisper.GroqWhisperTranscription",
     },
     "embedding": {
-        "huggingface": "integrations.embeddings.huggingface.HuggingFaceEmbeddingsProvider",
+        "gemini": "integrations.embeddings.gemini.GeminiEmbeddings",
+        "noop": "integrations.embeddings.noop.NoopEmbeddings",
     },
     "vectorstore": {
-        "cockroach": "integrations.vectorstore.cockroach.CockroachVectorStoreProvider",
+        "cockroach": "integrations.vectorstore.cockroach.CockroachVectorStore",
         "memory": "integrations.vectorstore.memory.MemoryVectorStore",
     },
     "storage": {
@@ -38,8 +38,6 @@ _PROVIDERS = {
 
 _singletons: dict = {}
 _lock = threading.Lock()
-
-LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8000"))
 
 
 def _import_class(dotted: str):
@@ -69,12 +67,10 @@ def get_transcription():
 
 
 def get_embeddings():
-    _maybe_warmup()
-    return _get("embedding", "EMBEDDING_PROVIDER", "huggingface")
+    return _get("embedding", "EMBEDDING_PROVIDER", "gemini")
 
 
 def get_vectorstore():
-    _maybe_warmup()
     return _get("vectorstore", "VECTORSTORE_PROVIDER", "cockroach")
 
 
@@ -92,45 +88,3 @@ def get_oauth():
 
 def get_analytics():
     return _get("analytics", "ANALYTICS_PROVIDER", "ga4")
-
-
-class _LazyProxy:
-    """ponytail: thread-safe lazy delegate for expensive vectorstore/embeddings."""
-
-    def __init__(self, factory):
-        self._factory = factory
-        self._delegate = None
-        self._lock = threading.Lock()
-
-    def _resolve(self):
-        if self._delegate is not None:
-            return self._delegate
-        with self._lock:
-            if self._delegate is None:
-                self._delegate = self._factory()
-        return self._delegate
-
-    def __getattr__(self, name):
-        return getattr(self._resolve(), name)
-
-
-def _background_warmup():
-    import time
-    time.sleep(1)
-    try:
-        get_embeddings()
-        get_vectorstore()
-        logger.info("Background warm-up complete")
-    except Exception as e:
-        logger.warning("Background warm-up failed: %s", e)
-
-
-_warmup_started = False
-
-
-def _maybe_warmup():
-    global _warmup_started
-    if _warmup_started or os.getenv("VECTORSTORE_PROVIDER", "cockroach") != "cockroach":
-        return
-    _warmup_started = True
-    threading.Thread(target=_background_warmup, daemon=True).start()

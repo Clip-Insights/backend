@@ -4,8 +4,7 @@ class ChatInputSerializer(serializers.Serializer):
     youtube_url = serializers.CharField(required=True)
     query = serializers.CharField(required=True)
     transcription = serializers.CharField(required=False, allow_blank=True)
-    slice_time = serializers.IntegerField(required=False, default=-1)
-    stream = serializers.BooleanField(required=False, default=False)
+    chat_history = serializers.ListField(child=serializers.DictField(), required=False, default=list)
 
 
 class SummaryInputSerializer(serializers.Serializer):
