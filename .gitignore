@@ -27,6 +27,7 @@ venv.bak/
 # IDE and editor files
 .idea/
 .vscode/
+.cursor/
 
 # Pytest cache
 .pytest_cache/
