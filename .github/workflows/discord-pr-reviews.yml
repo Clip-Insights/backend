@@ -25,11 +25,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           EMOJI="👀"
-          TITLE="PR ready for review"
           COLOR=5763719
 
           jq -n \
-            --arg title "${EMOJI} ${TITLE}" \
+            --arg title "${EMOJI} PR #${PR_NUMBER} - ready for review" \
             --arg pr_title "$PR_TITLE" \
             --arg url "$PR_URL" \
             --argjson color "$COLOR" \
@@ -37,7 +36,6 @@ jobs:
             --arg author "$PR_AUTHOR" \
             --arg head "$PR_HEAD" \
             --arg base "$PR_BASE" \
-            --arg footer "PR #${PR_NUMBER}" \
             '
               {
               embeds: [{
@@ -50,7 +48,6 @@ jobs:
                   {name: "Author", value: ("@" + $author), inline: true},
                   {name: "Branch", value: ("`" + $head + "` → `" + $base + "`"), inline: false}
                 ],
-                footer: {text: $footer}
               }]
             }' > /tmp/discord_payload.json
 
