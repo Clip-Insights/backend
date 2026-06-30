@@ -22,43 +22,46 @@ jobs:
           fi
 
       - name: Post to Discord #deployments
+        env:
+          ENV_LABEL: ${{ steps.env.outputs.label }}
+          ENV_COLOR: ${{ steps.env.outputs.color }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ github.ref_name }}
         run: |
-          # Shorten the commit SHA for display
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          COMMIT_URL="https://github.com/${REPO}/commit/${COMMIT_SHA}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
 
-          cat > /tmp/discord_payload.json << EOF
-          {
-            "embeds": [{
-              "title": "📦 Deploy pushed — ${{ steps.env.outputs.label }}",
-              "description": "${{ github.event.head_commit.message }}",
-              "url": "${COMMIT_URL}",
-              "color": ${{ steps.env.outputs.color }},
-              "fields": [
-                {
-                  "name": "Repo",
-                  "value": "${{ github.repository }}",
-                  "inline": true
-                },
-                {
-                  "name": "Pushed by",
-                  "value": "@${{ github.actor }}",
-                  "inline": true
-                },
-                {
-                  "name": "Commit",
-                  "value": "[\`${SHORT_SHA}\`](${COMMIT_URL})",
-                  "inline": true
-                }
-              ],
-              "footer": {
-                "text": "Branch: ${{ github.ref_name }}"
+          jq -n \
+            --arg env_label "$ENV_LABEL" \
+            --arg message "$COMMIT_MSG" \
+            --arg url "$COMMIT_URL" \
+            --argjson color "$ENV_COLOR" \
+            --arg repo "$REPO" \
+            --arg actor "$ACTOR" \
+            --arg short_sha "$SHORT_SHA" \
+            --arg branch "$BRANCH" \
+            '
+              ("📦 Deploy pushed — " + $env_label) as $title |
+              {
+                embeds: [{
+                  title: $title,
+                  description: $message,
+                  url: $url,
+                  color: $color,
+                  fields: [
+                    {name: "Repo", value: $repo, inline: true},
+                    {name: "Pushed by", value: ("@" + $actor), inline: true},
+                    {name: "Commit", value: ("[`" + $short_sha + "`](" + $url + ")"), inline: true}
+                  ],
+                  footer: {text: ("Branch: " + $branch)}
+                }]
               }
-            }]
-          }
-          EOF
+            ' > /tmp/discord_payload.json
 
-          curl -X POST \
+          curl --fail -sS -X POST \
             -H "Content-Type: application/json" \
             -d @/tmp/discord_payload.json \
             "${{ secrets.DISCORD_DEPLOYMENTS_WEBHOOK }}"

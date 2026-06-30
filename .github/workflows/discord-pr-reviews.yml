@@ -9,12 +9,23 @@ on:
 
 jobs:
   notify:
+    # Skip draft opens; ready_for_review fires when the PR becomes reviewable
+    if: github.event.action != 'opened' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - name: Build message payload
         id: payload
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_REPO: ${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REQUESTED_REVIEWER: ${{ github.event.requested_reviewer.login }}
+          REQUESTED_TEAM: ${{ github.event.requested_team.slug }}
         run: |
-          # Pick an emoji based on the event type
           case "${{ github.event.action }}" in
             opened)
               EMOJI="🟢"
@@ -33,48 +44,45 @@ jobs:
               ;;
           esac
 
-          # Who was requested to review (only set on review_requested)
-          REVIEWER="${{ github.event.requested_reviewer.login }}"
           REVIEWER_LINE=""
-          if [ -n "$REVIEWER" ]; then
-            REVIEWER_LINE="**Reviewer:** @${REVIEWER}"
+          if [ -n "$REQUESTED_REVIEWER" ]; then
+            REVIEWER_LINE="**Reviewer:** @${REQUESTED_REVIEWER}"
+          elif [ -n "$REQUESTED_TEAM" ]; then
+            REVIEWER_LINE="**Team:** @${REQUESTED_TEAM}"
           fi
 
-          # Write the JSON payload to a file to avoid shell-escaping issues
-          cat > /tmp/discord_payload.json << EOF
-          {
-            "embeds": [{
-              "title": "${EMOJI} ${TITLE}",
-              "description": "**${{ github.event.pull_request.title }}**\n${REVIEWER_LINE}",
-              "url": "${{ github.event.pull_request.html_url }}",
-              "color": ${COLOR},
-              "fields": [
-                {
-                  "name": "Repo",
-                  "value": "${{ github.repository }}",
-                  "inline": true
-                },
-                {
-                  "name": "Author",
-                  "value": "@${{ github.event.pull_request.user.login }}",
-                  "inline": true
-                },
-                {
-                  "name": "Branch",
-                  "value": "\`${{ github.event.pull_request.head.ref }}\` → \`${{ github.event.pull_request.base.ref }}\`",
-                  "inline": false
-                }
-              ],
-              "footer": {
-                "text": "PR #${{ github.event.pull_request.number }}"
-              }
-            }]
-          }
-          EOF
+          jq -n \
+            --arg title "${EMOJI} ${TITLE}" \
+            --arg pr_title "$PR_TITLE" \
+            --arg reviewer_line "$REVIEWER_LINE" \
+            --arg url "$PR_URL" \
+            --argjson color "$COLOR" \
+            --arg repo "$PR_REPO" \
+            --arg author "$PR_AUTHOR" \
+            --arg head "$PR_HEAD" \
+            --arg base "$PR_BASE" \
+            --arg footer "PR #${PR_NUMBER}" \
+            '
+              ($pr_title | "**" + . + "**") as $base_desc |
+              (if $reviewer_line != "" then $base_desc + "\n" + $reviewer_line else $base_desc end) as $description |
+              {
+              embeds: [{
+                title: $title,
+                description: $description,
+                url: $url,
+                color: $color,
+                fields: [
+                  {name: "Repo", value: $repo, inline: true},
+                  {name: "Author", value: ("@" + $author), inline: true},
+                  {name: "Branch", value: ("`" + $head + "` → `" + $base + "`"), inline: false}
+                ],
+                footer: {text: $footer}
+              }]
+            }' > /tmp/discord_payload.json
 
       - name: Post to Discord #pr-reviews
         run: |
-          curl -X POST \
+          curl --fail -sS -X POST \
             -H "Content-Type: application/json" \
             -d @/tmp/discord_payload.json \
             "${{ secrets.DISCORD_PR_REVIEWS_WEBHOOK }}"
