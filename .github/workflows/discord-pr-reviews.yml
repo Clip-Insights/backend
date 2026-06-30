@@ -5,6 +5,7 @@ on:
     types:
       - opened           # new non-draft PR
       - ready_for_review # draft PR marked ready
+      - reopened         # closed PR reopened
 
 jobs:
   notify:
