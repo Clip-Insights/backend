@@ -3,8 +3,7 @@ name: Discord — PR Reviews
 on:
   pull_request:
     types:
-      - opened          # new PR created
-      - review_requested # someone was asked to review
+      - opened           # new non-draft PR
       - ready_for_review # draft PR marked ready
 
 jobs:
@@ -23,38 +22,14 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.ref }}
           PR_BASE: ${{ github.event.pull_request.base.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REQUESTED_REVIEWER: ${{ github.event.requested_reviewer.login }}
-          REQUESTED_TEAM: ${{ github.event.requested_team.slug }}
         run: |
-          case "${{ github.event.action }}" in
-            opened)
-              EMOJI="🟢"
-              TITLE="New PR opened"
-              COLOR=3066993
-              ;;
-            review_requested)
-              EMOJI="👀"
-              TITLE="Review requested"
-              COLOR=16776960
-              ;;
-            ready_for_review)
-              EMOJI="✅"
-              TITLE="PR ready for review"
-              COLOR=5763719
-              ;;
-          esac
-
-          REVIEWER_LINE=""
-          if [ -n "$REQUESTED_REVIEWER" ]; then
-            REVIEWER_LINE="**Reviewer:** @${REQUESTED_REVIEWER}"
-          elif [ -n "$REQUESTED_TEAM" ]; then
-            REVIEWER_LINE="**Team:** @${REQUESTED_TEAM}"
-          fi
+          EMOJI="👀"
+          TITLE="PR ready for review"
+          COLOR=5763719
 
           jq -n \
             --arg title "${EMOJI} ${TITLE}" \
             --arg pr_title "$PR_TITLE" \
-            --arg reviewer_line "$REVIEWER_LINE" \
             --arg url "$PR_URL" \
             --argjson color "$COLOR" \
             --arg repo "$PR_REPO" \
@@ -63,12 +38,10 @@ jobs:
             --arg base "$PR_BASE" \
             --arg footer "PR #${PR_NUMBER}" \
             '
-              ($pr_title | "**" + . + "**") as $base_desc |
-              (if $reviewer_line != "" then $base_desc + "\n" + $reviewer_line else $base_desc end) as $description |
               {
               embeds: [{
                 title: $title,
-                description: $description,
+                description: ("**" + $pr_title + "**"),
                 url: $url,
                 color: $color,
                 fields: [
