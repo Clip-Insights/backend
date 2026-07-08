@@ -5,13 +5,29 @@ patched so the suite is fast, deterministic and offline (FIRST principles).
 """
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
 
+from plans.models import Plan, UsageEvent
+from plans.services import record_usage
 from videos.services.chat import _format_history, _retrieve_context, build_chat_stream
 from videos.services.chunking import chunk_text
 from videos.services.summarize import VideoSummary, generate_summary
+
+User = get_user_model()
+
+
+def make_user(email="user@test.com"):
+    return User.objects.create_user(email=email, name="Test User", password="pass12345")
+
+
+def exhaust(user, kind, limit_field):
+    """Record enough usage events to hit the free plan's limit for `kind`."""
+    limit = getattr(Plan.objects.get(slug=Plan.FREE), limit_field)
+    for _ in range(limit):
+        record_usage(user, kind)
 
 
 class DummyLLM:
@@ -32,6 +48,45 @@ class ChatViewTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse("chat")
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+
+    def test_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.post(self.url, {"youtube_url": "http://x", "query": "q"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_daily_limit_returns_structured_429(self):
+        exhaust(self.user, UsageEvent.KIND_CHAT, "daily_chat_messages")
+        response = self.client.post(
+            self.url, {"youtube_url": "http://x", "query": "q", "transcription": "t"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        data = response.json()
+        self.assertEqual(data["code"], "limit_exceeded")
+        self.assertEqual(data["reason"], "daily_chat_limit")
+        self.assertEqual(data["cta"], "upgrade")
+
+    @patch("videos.views.build_chat_stream", return_value=iter(["data: ok\n\n", "data: [DONE]\n\n"]))
+    def test_oversized_query_is_truncated_not_rejected(self, mock_stream):
+        max_chars = Plan.objects.get(slug=Plan.FREE).max_chat_query_chars
+        payload = {
+            "youtube_url": "http://x",
+            "query": "q" * (max_chars + 500),
+            "transcription": "t",
+        }
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        b"".join(response.streaming_content)
+        sent_query = mock_stream.call_args.args[1]
+        self.assertEqual(len(sent_query), max_chars)
+
+    @patch("videos.services.chat.get_llm", return_value=DummyLLM())
+    def test_completed_stream_records_one_usage_event(self, _mock_llm):
+        payload = {"youtube_url": "http://x", "query": "q", "transcription": "Dummy transcription text."}
+        response = self.client.post(self.url, payload, format="json")
+        b"".join(response.streaming_content)
+        self.assertEqual(UsageEvent.objects.filter(user=self.user, kind=UsageEvent.KIND_CHAT).count(), 1)
 
     def test_missing_fields_returns_400(self):
         response = self.client.post(self.url, {}, format="json")
@@ -74,6 +129,30 @@ class SummaryViewTests(APITestCase):
     def setUp(self):
         self.client = APIClient()
         self.url = reverse("summary")
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+
+    def test_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.post(self.url, {"youtube_url": "http://x", "transcription": "t"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_daily_limit_returns_structured_429(self):
+        exhaust(self.user, UsageEvent.KIND_SUMMARY, "daily_summaries")
+        response = self.client.post(self.url, {"youtube_url": "http://x", "transcription": "t"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["reason"], "daily_summary_limit")
+
+    @patch("videos.services.summarize.get_llm", return_value=DummyLLM())
+    def test_success_records_one_usage_event(self, _mock_llm):
+        payload = {"youtube_url": "http://x", "transcription": "t"}
+        self.client.post(self.url, payload, format="json")
+        self.assertEqual(UsageEvent.objects.filter(user=self.user, kind=UsageEvent.KIND_SUMMARY).count(), 1)
+
+    @patch("videos.views.generate_summary", return_value=({"success": False, "error": "boom"}, 500))
+    def test_failure_is_not_charged(self, _mock):
+        self.client.post(self.url, {"youtube_url": "http://x", "transcription": "t"}, format="json")
+        self.assertEqual(UsageEvent.objects.filter(user=self.user).count(), 0)
 
     def test_missing_youtube_url_returns_400(self):
         response = self.client.post(self.url, {"transcription": "x"}, format="json")
@@ -108,12 +187,17 @@ class SummaryViewTests(APITestCase):
 # Token-limit endpoint
 # --------------------------------------------------------------------------- #
 class TokenLimitViewTests(APITestCase):
-    def test_returns_tokens_and_char_per_token(self):
+    def test_anonymous_gets_guest_budget(self):
         response = self.client.get(reverse("tokenlimit"), format="json")
         data = response.json()
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn("tokens", data)
+        self.assertEqual(data["tokens"], Plan.objects.get(slug=Plan.GUEST).transcript_token_budget)
         self.assertEqual(data["charPerToken"], 3)
+
+    def test_authenticated_gets_plan_budget(self):
+        self.client.force_authenticate(user=make_user())
+        response = self.client.get(reverse("tokenlimit"), format="json")
+        self.assertEqual(response.json()["tokens"], Plan.objects.get(slug=Plan.FREE).transcript_token_budget)
 
 
 # --------------------------------------------------------------------------- #
@@ -122,6 +206,30 @@ class TokenLimitViewTests(APITestCase):
 class TranscribeViewTests(APITestCase):
     def setUp(self):
         self.url = reverse("transcribe")
+        self.user = make_user()
+        self.client.force_authenticate(user=self.user)
+
+    def test_unauthenticated_returns_401(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.post(self.url, {"youtube_url": "http://youtube.com/watch?v=x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_daily_limit_returns_structured_429(self):
+        exhaust(self.user, UsageEvent.KIND_TRANSCRIPTION, "daily_transcriptions")
+        response = self.client.post(self.url, {"youtube_url": "http://youtube.com/watch?v=x"}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["reason"], "daily_transcription_limit")
+
+    @patch("videos.views.transcribe_youtube", return_value={"transcription": "hello"})
+    def test_duration_is_clamped_to_plan_and_usage_recorded(self, mock_transcribe):
+        max_seconds = Plan.objects.get(slug=Plan.FREE).max_transcription_seconds
+        payload = {"youtube_url": "http://youtube.com/watch?v=x", "duration": max_seconds + 999}
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(mock_transcribe.call_args.kwargs["duration"], max_seconds)
+        self.assertEqual(
+            UsageEvent.objects.filter(user=self.user, kind=UsageEvent.KIND_TRANSCRIPTION).count(), 1
+        )
 
     def test_missing_url_returns_400(self):
         response = self.client.post(self.url, {}, format="json")
