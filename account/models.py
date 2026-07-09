@@ -31,8 +31,9 @@ class UserManager(BaseUserManager):
             name=name,
         )
         user.is_admin = True
-        user.is_active = True  
-        user.is_verified = True  
+        user.is_staff = True
+        user.is_active = True
+        user.is_verified = True
         user.save(using=self._db)
         return user
 
@@ -48,11 +49,10 @@ class User(AbstractUser):
     )
     name = models.CharField(max_length=200)
     username = models.CharField(max_length=150, unique=True, null=True, blank=True)
-    is_active = models.BooleanField(default=False) 
+    is_active = models.BooleanField(default=False)
     is_admin = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_staff = models.BooleanField(default=False)
     allocated_space = models.FloatField(
         verbose_name="Allocated Space in bytes",
         default=convert_to_bytes(50),  # Default allocated space is 50MB
@@ -69,17 +69,10 @@ class User(AbstractUser):
         return self.email
 
     def has_perm(self, perm, obj=None):
-        "Does the user have a specific permission?"
-        # Simplest possible answer: Yes, always
         return self.is_admin
 
     def has_module_perms(self, app_label):
-        "Does the user have permissions to view the app `app_label`?"
-        # Simplest possible answer: Yes, always
         return True
 
-    @property
-    def is_staff(self):
-        "Is the user a member of staff?"
-        # Simplest possible answer: All admins are staff
-        return self.is_admin
+    # ponytail: keep AbstractUser.is_staff as the DB column (default False).
+    # A @property named is_staff used to shadow it and caused NULL inserts.
