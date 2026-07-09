@@ -24,24 +24,45 @@ def make_user(email="user@test.com"):
     return User.objects.create_user(email=email, name="Test User", password="pass12345")
 
 
+def reload(user):
+    """Fresh instance without cached relations, like a real request's user."""
+    return User.objects.get(pk=user.pk)
+
+
 class PlanResolutionTests(APITestCase):
     def test_anonymous_gets_guest_plan(self):
         self.assertEqual(get_plan_for(None).slug, Plan.GUEST)
 
-    def test_user_without_user_plan_gets_free(self):
+    def test_new_user_gets_free_plan_row_on_creation(self):
+        # The post_save signal creates the row the moment the account exists.
         user = make_user()
+        self.assertEqual(UserPlan.objects.get(user=user).plan.slug, Plan.FREE)
         self.assertEqual(get_plan_for(user).slug, Plan.FREE)
+
+    def test_legacy_user_without_row_selfheals_on_first_request(self):
+        # Users created before the plans app have no row; resolving their plan
+        # must both answer "free" and create the missing row.
+        user = make_user()
+        UserPlan.objects.filter(user=user).delete()
+        user = reload(user)
+        self.assertEqual(get_plan_for(user).slug, Plan.FREE)
+        self.assertTrue(UserPlan.objects.filter(user=user, plan__slug=Plan.FREE).exists())
 
     def test_user_with_active_paid_plan(self):
         user = make_user()
         pro = Plan.objects.get(slug=Plan.PRO)
-        UserPlan.objects.create(user=user, plan=pro, expires_at=now() + timedelta(days=30))
-        self.assertEqual(get_plan_for(user).slug, Plan.PRO)
+        # Paddle contract: plan changes are upserts on the existing row.
+        UserPlan.objects.update_or_create(
+            user=user, defaults={"plan": pro, "expires_at": now() + timedelta(days=30)}
+        )
+        self.assertEqual(get_plan_for(reload(user)).slug, Plan.PRO)
 
     def test_expired_paid_plan_falls_back_to_free(self):
         user = make_user()
         pro = Plan.objects.get(slug=Plan.PRO)
-        UserPlan.objects.create(user=user, plan=pro, expires_at=now() - timedelta(days=1))
+        UserPlan.objects.update_or_create(
+            user=user, defaults={"plan": pro, "expires_at": now() - timedelta(days=1)}
+        )
         self.assertEqual(get_plan_for(user).slug, Plan.FREE)
 
     def test_inactive_plan_falls_back_to_free(self):
@@ -49,7 +70,7 @@ class PlanResolutionTests(APITestCase):
         pro = Plan.objects.get(slug=Plan.PRO)
         pro.is_active = False
         pro.save()
-        UserPlan.objects.create(user=user, plan=pro)
+        UserPlan.objects.update_or_create(user=user, defaults={"plan": pro})
         self.assertEqual(get_plan_for(user).slug, Plan.FREE)
 
 
@@ -105,6 +126,20 @@ class PlanEndpointTests(APITestCase):
     def test_my_plan_requires_auth(self):
         response = self.client.get(reverse("my-plan"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_my_plan_selfheals_legacy_user_and_returns_zero_usage(self):
+        user = make_user()
+        UserPlan.objects.filter(user=user).delete()  # simulate a pre-plans account
+        user = reload(user)
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(reverse("my-plan"))
+        data = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(data["plan"]["slug"], "free")
+        self.assertEqual(data["usage"]["summary"]["used"], 0)
+        self.assertTrue(UserPlan.objects.filter(user=user, plan__slug=Plan.FREE).exists())
 
     def test_my_plan_returns_plan_and_usage(self):
         user = make_user()

@@ -3,16 +3,38 @@ from typing import TypeVar
 
 import google.generativeai as genai
 import instructor
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
 from integrations.keys import APIKeyManager, load_api_keys
 
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
+# gemini-2.5-flash is retiring; Gemini 3 Flash is the replacement. The stable
+# `gemini-3.5-flash` also works but is frequently capacity-throttled (503) on
+# free-tier keys, so the reliably-served Gemini 3 Flash id is the default.
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3-flash-preview")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
 LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8000"))
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _text_of(message) -> str:
+    """Plain text of a LangChain message/chunk.
+
+    Gemini 3 models return `content` as a list of typed blocks (text, thinking,
+    signatures...) instead of a string; only the text blocks are user-facing.
+    """
+    content = message.content
+    if isinstance(content, str):
+        return content
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text", ""))
+    return "".join(parts)
 
 
 class GeminiLLM:
@@ -31,12 +53,31 @@ class GeminiLLM:
 
     def complete(self, prompt: str, *, temperature: float | None = None) -> str:
         response = self._client(streaming=False, temperature=temperature).invoke(prompt)
-        return response.content
+        return _text_of(response)
 
     def stream(self, prompt: str, *, temperature: float | None = None):
         for chunk in self._client(streaming=True, temperature=temperature).stream(prompt):
-            if chunk.content:
-                yield chunk.content
+            text = _text_of(chunk)
+            if text:
+                yield text
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        *,
+        system: str | None = None,
+        temperature: float | None = None,
+    ):
+        lc_messages = []
+        if system:
+            lc_messages.append(SystemMessage(content=system))
+        for message in messages:
+            role_cls = HumanMessage if message.get("role") == "user" else AIMessage
+            lc_messages.append(role_cls(content=message.get("content", "")))
+        for chunk in self._client(streaming=True, temperature=temperature).stream(lc_messages):
+            text = _text_of(chunk)
+            if text:
+                yield text
 
     def structured(self, prompt: str, response_model: type[T], *, temperature: float | None = None) -> T:
         """Return a validated Pydantic object using instructor for structured output.

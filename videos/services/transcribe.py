@@ -4,7 +4,6 @@ import re
 import traceback
 from uuid import uuid4
 
-import yt_dlp
 from django.conf import settings
 from django.utils.timezone import now
 
@@ -15,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def yt_dlp_download(yt_url: str, output_path: str = None, duration: int = 300) -> str:
+    # Deferred import: yt_dlp is heavy and only needed when a download runs.
+    import yt_dlp
+
     if output_path is None:
         output_path = os.path.join(settings.BASE_DIR, "media", "temp")
     os.makedirs(output_path, exist_ok=True)

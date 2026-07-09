@@ -1,6 +1,5 @@
 import logging
 
-import yt_dlp
 from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -136,6 +135,10 @@ class TranscribeView(APIView):
         enforce_daily_limit(request.user, plan, UsageEvent.KIND_TRANSCRIPTION)
         if duration < 0 or duration > plan.max_transcription_seconds:
             duration = plan.max_transcription_seconds
+
+        # Imported here, not at module level: yt_dlp costs ~200ms+ at import
+        # and would slow every cold start for an endpoint that is rarely hit.
+        import yt_dlp
 
         try:
             result = transcribe_youtube(youtube_url, duration=duration)
