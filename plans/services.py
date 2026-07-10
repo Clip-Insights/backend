@@ -42,7 +42,6 @@ def _get_plan(slug: str) -> Plan:
 DAILY_LIMIT_FIELDS = {
     UsageEvent.KIND_SUMMARY: ("daily_summaries", "summaries"),
     UsageEvent.KIND_CHAT: ("daily_chat_messages", "chat messages"),
-    UsageEvent.KIND_TRANSCRIPTION: ("daily_transcriptions", "transcriptions"),
 }
 
 

@@ -15,9 +15,9 @@ import numbers by roughly 3-10x because startup CPU is throttled).
    (`core/settings.py`). Django's default closes the connection after every
    request, so *every* API call was paying the ~1-2 s TLS handshake again.
    This is the single biggest win for "summary/chat/everything is slow".
-2. **Lazy `yt_dlp` import** (`videos/views.py`, `videos/services/transcribe.py`)
-   — ~200 ms of import work removed from every cold start; only the rarely-used
-   `/transcribe/` endpoint pays it now.
+2. **Lazy `yt_dlp` import** (`videos/services/transcribe.py`) — ~200 ms of
+   import work removed from every cold start; only the dormant Whisper
+   transcription service pays it when invoked.
 3. **Bytecode precompiled at build** (`Dockerfile` `compileall`) — with
    `PYTHONDONTWRITEBYTECODE=1` every cold start was re-compiling every module;
    now the image ships `.pyc` files.

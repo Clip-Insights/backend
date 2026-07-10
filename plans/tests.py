@@ -107,7 +107,7 @@ class DailyLimitTests(APITestCase):
         self.assertEqual(summary["chat"]["limit"], self.free.daily_chat_messages)
         self.assertEqual(summary["chat"]["remaining"], self.free.daily_chat_messages - 1)
         self.assertIn("summary", summary)
-        self.assertIn("transcription", summary)
+        self.assertNotIn("transcription", summary)
 
 
 class PlanEndpointTests(APITestCase):

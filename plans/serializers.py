@@ -6,10 +6,8 @@ from .models import Plan
 LIMIT_FIELDS = [
     "daily_summaries",
     "daily_chat_messages",
-    "daily_transcriptions",
     "max_chat_query_chars",
     "transcript_token_budget",
-    "max_transcription_seconds",
     "storage_limit_mb",
     "max_file_size_mb",
     "max_note_chars",

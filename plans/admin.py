@@ -12,7 +12,6 @@ class PlanAdmin(admin.ModelAdmin):
         "is_active",
         "daily_summaries",
         "daily_chat_messages",
-        "daily_transcriptions",
         "storage_limit_mb",
     )
     list_filter = ("is_active",)

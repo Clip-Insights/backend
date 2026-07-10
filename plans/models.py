@@ -31,13 +31,9 @@ class Plan(models.Model):
     # AI limits (rolling 24h windows). Summary and key points are one request.
     daily_summaries = models.PositiveIntegerField(default=0)
     daily_chat_messages = models.PositiveIntegerField(default=0)
-    daily_transcriptions = models.PositiveIntegerField(default=0)
     max_chat_query_chars = models.PositiveIntegerField(default=0)
     transcript_token_budget = models.PositiveIntegerField(
         default=0, help_text="Max transcript tokens sent per AI request (video token limit)"
-    )
-    max_transcription_seconds = models.PositiveIntegerField(
-        default=0, help_text="Max audio duration transcribed per request"
     )
 
     # Storage limits
@@ -89,11 +85,9 @@ class UsageEvent(models.Model):
 
     KIND_SUMMARY = "summary"
     KIND_CHAT = "chat"
-    KIND_TRANSCRIPTION = "transcription"
     KIND_CHOICES = [
         (KIND_SUMMARY, "Summary + key points"),
         (KIND_CHAT, "Chat message"),
-        (KIND_TRANSCRIPTION, "Audio transcription"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="usage_events")

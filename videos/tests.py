@@ -216,46 +216,6 @@ class TokenLimitViewTests(APITestCase):
 
 
 # --------------------------------------------------------------------------- #
-# Transcribe endpoint (input validation only — no network)
-# --------------------------------------------------------------------------- #
-class TranscribeViewTests(APITestCase):
-    def setUp(self):
-        self.url = reverse("transcribe")
-        self.user = make_user()
-        self.client.force_authenticate(user=self.user)
-
-    def test_unauthenticated_returns_401(self):
-        self.client.force_authenticate(user=None)
-        response = self.client.post(self.url, {"youtube_url": "http://youtube.com/watch?v=x"}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_daily_limit_returns_structured_429(self):
-        exhaust(self.user, UsageEvent.KIND_TRANSCRIPTION, "daily_transcriptions")
-        response = self.client.post(self.url, {"youtube_url": "http://youtube.com/watch?v=x"}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
-        self.assertEqual(response.json()["reason"], "daily_transcription_limit")
-
-    @patch("videos.views.transcribe_youtube", return_value={"transcription": "hello"})
-    def test_duration_is_clamped_to_plan_and_usage_recorded(self, mock_transcribe):
-        max_seconds = Plan.objects.get(slug=Plan.FREE).max_transcription_seconds
-        payload = {"youtube_url": "http://youtube.com/watch?v=x", "duration": max_seconds + 999}
-        response = self.client.post(self.url, payload, format="json")
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(mock_transcribe.call_args.kwargs["duration"], max_seconds)
-        self.assertEqual(
-            UsageEvent.objects.filter(user=self.user, kind=UsageEvent.KIND_TRANSCRIPTION).count(), 1
-        )
-
-    def test_missing_url_returns_400(self):
-        response = self.client.post(self.url, {}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_non_url_returns_400(self):
-        response = self.client.post(self.url, {"youtube_url": "not-a-url"}, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-
-# --------------------------------------------------------------------------- #
 # Service-level unit tests (no HTTP layer)
 # --------------------------------------------------------------------------- #
 class SummarizeServiceTests(APITestCase):

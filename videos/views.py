@@ -8,10 +8,9 @@ from rest_framework.views import APIView
 
 from plans.models import UsageEvent
 from plans.services import enforce_daily_limit, get_plan_for, record_usage
-from videos.serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
+from videos.serializers import ChatInputSerializer, SummaryInputSerializer
 from videos.services.chat import build_chat_stream
 from videos.services.summarize import generate_summary
-from videos.services.transcribe import transcribe_youtube
 
 logger = logging.getLogger(__name__)
 
@@ -114,42 +113,3 @@ class TokenLimitView(APIView):
             {"tokens": plan.transcript_token_budget, "charPerToken": CHARS_PER_TOKEN},
             status=status.HTTP_200_OK,
         )
-
-
-class TranscribeView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, *args, **kwargs):
-        serializer = TranscribeInputSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        validated_data = serializer.validated_data
-        youtube_url = validated_data.get("youtube_url")
-        duration = validated_data.get("duration", 300)
-
-        if not youtube_url:
-            return Response({"youtube_url": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
-
-        plan = get_plan_for(request.user)
-        enforce_daily_limit(request.user, plan, UsageEvent.KIND_TRANSCRIPTION)
-        if duration < 0 or duration > plan.max_transcription_seconds:
-            duration = plan.max_transcription_seconds
-
-        # Imported here, not at module level: yt_dlp costs ~200ms+ at import
-        # and would slow every cold start for an endpoint that is rarely hit.
-        import yt_dlp
-
-        try:
-            result = transcribe_youtube(youtube_url, duration=duration)
-            record_usage(request.user, UsageEvent.KIND_TRANSCRIPTION)
-            return Response(result, status=status.HTTP_200_OK)
-        except ValueError as e:
-            return Response({"youtube_url": [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
-        except FileNotFoundError as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except yt_dlp.utils.DownloadError:
-            return Response({"error": "Failed to download audio"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except Exception as e:
-            logger.error("Transcription failed: %s", e)
-            return Response({"error": "Transcription failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
