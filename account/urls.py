@@ -13,6 +13,7 @@ from account.views import (
     UserPasswordResetView,
     UserLogoutView,
     EmailVerificationView,
+    ResendVerificationView,
 )
 
 urlpatterns = [
@@ -27,4 +28,5 @@ urlpatterns = [
     path('logout/', UserLogoutView.as_view(), name='logout'),
     path('google-login/', GoogleLoginView.as_view(), name='google-login'),
     path('verify-email/<uid>/<token>/', EmailVerificationView.as_view(), name='verify-email'),
+    path('resend-verification/', ResendVerificationView.as_view(), name='resend-verification'),
 ]
