@@ -24,6 +24,7 @@ dependencies = [
     "django-cockroachdb>=6.0",
     "uvicorn>=0.40.0",
     "instructor>=1.15.4",
+    "openai>=1.0.0",
 ]
 
 [dependency-groups]
