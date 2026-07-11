@@ -67,9 +67,10 @@ RUN python manage.py collectstatic --noinput --clear || echo "Static collection 
 # Precompile the application code too (cold starts read .pyc instead of compiling)
 RUN python -m compileall -q /app
 
-# Copy optimized entrypoint
+# Copy optimized entrypoint. Strip any CR so a Windows-checked-out entrypoint
+# (CRLF) doesn't turn the shebang into `/bin/sh\r` -> "no such file or directory".
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser && \
