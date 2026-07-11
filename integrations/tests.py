@@ -66,6 +66,62 @@ def test_registry_resolves_embeddings_and_vectorstore(monkeypatch):
     assert registry.get_vectorstore() is registry.get_vectorstore()
 
 
+def test_registry_resolves_fireworks_providers(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "fireworks")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "fireworks")
+    monkeypatch.setenv("FIREWORKS_API_KEYS", "fw-test-key")
+    registry._singletons.clear()
+    from integrations.embeddings.fireworks import FireworksEmbeddings
+    from integrations.llm.fireworks import FireworksLLM
+
+    llm = registry.get_llm()
+    embeddings = registry.get_embeddings()
+    assert isinstance(llm, FireworksLLM)
+    assert isinstance(embeddings, FireworksEmbeddings)
+    assert embeddings.model_id  # env-driven; used as RAG store key prefix
+    assert registry.get_llm() is llm
+    assert registry.get_embeddings() is embeddings
+
+
+def test_fireworks_embeddings_nomic_prefixes(monkeypatch):
+    monkeypatch.setenv("FIREWORKS_API_KEYS", "fw-test-key")
+    import integrations.embeddings.fireworks as fw_emb
+
+    captured = {}
+
+    class FakeEmbedding:
+        def __init__(self, embedding, index):
+            self.embedding = embedding
+            self.index = index
+
+    class FakeResponse:
+        def __init__(self, data):
+            self.data = data
+
+    class FakeEmbeddingsAPI:
+        def create(self, **kwargs):
+            captured["kwargs"] = kwargs
+            inputs = kwargs["input"]
+            return FakeResponse(
+                [FakeEmbedding([float(i), 0.0], i) for i in range(len(inputs))]
+            )
+
+    class FakeClient:
+        embeddings = FakeEmbeddingsAPI()
+
+    monkeypatch.setattr(fw_emb, "openai_client", lambda _key: FakeClient())
+    embeddings = fw_emb.FireworksEmbeddings()
+    embeddings.model_id = "nomic-ai/nomic-embed-text-v1.5"
+    docs = embeddings.embed_documents(["alpha", "beta"])
+    assert captured["kwargs"]["input"] == [
+        "search_document: alpha",
+        "search_document: beta",
+    ]
+    assert len(docs) == 2
+    embeddings.embed_query("hello")
+    assert captured["kwargs"]["input"] == ["search_query: hello"]
+
+
 # --------------------------------------------------------------------------- #
 # NoopLLM
 # --------------------------------------------------------------------------- #

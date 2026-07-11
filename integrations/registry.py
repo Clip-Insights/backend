@@ -4,6 +4,7 @@ import threading
 
 _PROVIDERS = {
     "llm": {
+        "fireworks": "integrations.llm.fireworks.FireworksLLM",
         "gemini": "integrations.llm.gemini.GeminiLLM",
         "noop": "integrations.llm.noop.NoopLLM",
     },
@@ -11,7 +12,7 @@ _PROVIDERS = {
         "groq": "integrations.transcription.groq_whisper.GroqWhisperTranscription",
     },
     "embedding": {
-        "gemini": "integrations.embeddings.gemini.GeminiEmbeddings",
+        "fireworks": "integrations.embeddings.fireworks.FireworksEmbeddings",
         "noop": "integrations.embeddings.noop.NoopEmbeddings",
     },
     "vectorstore": {
@@ -58,7 +59,7 @@ def _get(kind: str, env_var: str, default: str):
 
 
 def get_llm():
-    return _get("llm", "LLM_PROVIDER", "gemini")
+    return _get("llm", "LLM_PROVIDER", "fireworks")
 
 
 def get_transcription():
@@ -66,7 +67,7 @@ def get_transcription():
 
 
 def get_embeddings():
-    return _get("embedding", "EMBEDDING_PROVIDER", "gemini")
+    return _get("embedding", "EMBEDDING_PROVIDER", "fireworks")
 
 
 def get_vectorstore():
