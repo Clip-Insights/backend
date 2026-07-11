@@ -55,8 +55,10 @@ WORKDIR /app
 COPY --from=app-deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy CockroachDB certificate
-COPY --from=app-deps /root/.postgresql/root.crt /root/.postgresql/root.crt
+# Copy CockroachDB certificate to a path readable by appuser. The Cloud Run
+# service sets DATABASE_CERT_PATH=/app/root.crt and settings.py passes it to
+# libpq as sslrootcert (the /root/... default is unreadable for appuser).
+COPY --from=app-deps /root/.postgresql/root.crt /app/root.crt
 
 # Copy application code (this layer changes frequently - LAST)
 COPY . .
