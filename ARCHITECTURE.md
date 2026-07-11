@@ -25,7 +25,7 @@ The API is stateless HTTP/JSON. AI generation is delegated to **Fireworks AI** (
 | Web framework | Django 6, Django REST Framework |
 | Auth | DRF SimpleJWT (access/refresh), custom `account.User`, Google OAuth |
 | LLM | Fireworks AI via OpenAI SDK (stream/complete/chat) + `instructor` (structured); optional Gemini via `langchain-google-genai` |
-| Embeddings | Fireworks AI OpenAI-compatible `/embeddings` (env-swappable `EMBEDDING_MODEL`) |
+| Embeddings | Fireworks AI OpenAI-compatible `/embeddings` (default); optional Gemini (`gemini-embedding-001`) |
 | Transcription | Groq Whisper (`groq`) |
 | Object storage | AWS S3 (`boto3`) |
 | Database | CockroachDB (`django-cockroachdb` + `psycopg`) |
@@ -73,7 +73,7 @@ Key environment variables:
 | `FIREWORKS_BASE_URL` | Fireworks inference base URL (default `https://api.fireworks.ai/inference/v1`) |
 | `LLM_MODEL` (default `accounts/fireworks/models/deepseek-v4-flash`), `LLM_TEMPERATURE`, `LLM_MAX_OUTPUT_TOKENS` | LLM tuning (model id is env-swappable for hackathons) |
 | `LLM_API_KEYS` | comma-separated Gemini keys when `LLM_PROVIDER=gemini` |
-| `EMBEDDING_PROVIDER` (default `fireworks`) | `fireworks` \| `noop` |
+| `EMBEDDING_PROVIDER` (default `fireworks`) | `fireworks` \| `gemini` \| `noop` |
 | `EMBEDDING_MODEL` (default `nomic-ai/nomic-embed-text-v1.5`) | embedding model id (env-swappable) |
 | `EMBEDDING_DIMENSIONS` (default `768`) | optional vector size passed to the embeddings API |
 | `TRANSCRIPTION_PROVIDER` (default `groq`), `GROQ_API_KEYS` | Whisper transcription |
@@ -96,7 +96,7 @@ Logging: a rotating file handler writes daily logs under `logs/` (50 MB × 10) p
 ```python
 get_llm()            # LLM_PROVIDER           → fireworks | gemini | noop
 get_transcription()  # TRANSCRIPTION_PROVIDER → groq
-get_embeddings()     # EMBEDDING_PROVIDER     → fireworks | noop
+get_embeddings()     # EMBEDDING_PROVIDER     → fireworks | gemini | noop
 get_vectorstore()    # VECTORSTORE_PROVIDER   → cockroach | memory
 get_storage()        # STORAGE_PROVIDER       → s3
 get_email()          # EMAIL_PROVIDER         → smtp | console
@@ -125,7 +125,8 @@ The `noop` LLM (`integrations/llm/noop.py`) returns canned responses and is used
 
 - **LLM** (`integrations/llm/fireworks.py`): OpenAI SDK against `FIREWORKS_BASE_URL`; `structured` uses **`instructor.from_openai`**. Model from `LLM_MODEL`.
 - **Embeddings** (`integrations/embeddings/fireworks.py`): same client; model from `EMBEDDING_MODEL`. Exposes `model_id` for RAG cache keys. Nomic models get `search_document:` / `search_query:` prefixes.
-- Keys from `FIREWORKS_API_KEYS` via `integrations.fireworks` + `APIKeyManager`.
+- **Gemini embeddings** (`integrations/embeddings/gemini.py`): `google.generativeai.embed_content` with `retrieval_document` / `retrieval_query` task types; keys from `LLM_API_KEYS`.
+- Keys from `FIREWORKS_API_KEYS` via `integrations.fireworks` + `APIKeyManager` (Fireworks LLM/embeddings).
 
 ### Gemini LLM (`integrations/llm/gemini.py`) — optional fallback
 

@@ -83,6 +83,18 @@ def test_registry_resolves_fireworks_providers(monkeypatch):
     assert registry.get_embeddings() is embeddings
 
 
+def test_registry_resolves_gemini_embeddings(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "gemini")
+    monkeypatch.setenv("LLM_API_KEYS", "gemini-test-key")
+    registry._singletons.clear()
+    from integrations.embeddings.gemini import GeminiEmbeddings
+
+    embeddings = registry.get_embeddings()
+    assert isinstance(embeddings, GeminiEmbeddings)
+    assert embeddings.model_id
+    assert registry.get_embeddings() is embeddings
+
+
 def test_fireworks_embeddings_nomic_prefixes(monkeypatch):
     monkeypatch.setenv("FIREWORKS_API_KEYS", "fw-test-key")
     import integrations.embeddings.fireworks as fw_emb

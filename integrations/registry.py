@@ -13,6 +13,7 @@ _PROVIDERS = {
     },
     "embedding": {
         "fireworks": "integrations.embeddings.fireworks.FireworksEmbeddings",
+        "gemini": "integrations.embeddings.gemini.GeminiEmbeddings",
         "noop": "integrations.embeddings.noop.NoopEmbeddings",
     },
     "vectorstore": {
