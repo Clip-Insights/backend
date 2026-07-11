@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "videos.apps.VideosConfig",
     "account",
     "analytics",
+    "plans",
 ]
 
 MIDDLEWARE = [
@@ -124,6 +125,11 @@ DATABASES = {
         "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
         "HOST": os.getenv("DATABASE_HOST", ""),
         "PORT": os.getenv("DATABASE_PORT", ""),
+        # Keep connections alive between requests. The TLS handshake to
+        # CockroachDB Cloud costs ~1-2s; Django's default (CONN_MAX_AGE=0)
+        # paid it on every single request.
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", 600)),
+        "CONN_HEALTH_CHECKS": True,
         'OPTIONS': {
             'sslmode': 'verify-full',
         }
@@ -183,7 +189,7 @@ REST_FRAMEWORK = {
 # https://django-rest-framework-simplejwt.readthedocs.io/en/latest/
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=600),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 

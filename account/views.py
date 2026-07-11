@@ -212,8 +212,6 @@ class GoogleLoginView(APIView):
                     name=idinfo.get("name", "") or email.split("@")[0],
                     is_verified=True,
                     is_active=True,
-                    is_staff=False,
-                    is_admin=False,
                 )
                 user.set_unusable_password()
                 user.save()

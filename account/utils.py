@@ -48,6 +48,3 @@ Best regards,
 The ClipInsights Team
 """
         get_email().send(to=data["to_email"], subject=data["subject"], body=body)
-
-def convert_to_bytes(mbs):
-    return mbs * 1024 * 1024

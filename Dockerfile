@@ -30,6 +30,11 @@ RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN uv sync --frozen --no-dev
 
+# Precompile dependency bytecode at build time. PYTHONDONTWRITEBYTECODE=1 means
+# nothing is cached at runtime, so without this every cold start re-compiles
+# every imported module. (|| true: some packages ship files that don't compile.)
+RUN python -m compileall -q /opt/venv || true
+
 # ============================================================
 # Stage 2: Final production image
 # ============================================================
@@ -58,6 +63,9 @@ COPY . .
 
 # Pre-collect static files during build (not at runtime)
 RUN python manage.py collectstatic --noinput --clear || echo "Static collection skipped"
+
+# Precompile the application code too (cold starts read .pyc instead of compiling)
+RUN python -m compileall -q /app
 
 # Copy optimized entrypoint
 COPY entrypoint.sh /app/entrypoint.sh

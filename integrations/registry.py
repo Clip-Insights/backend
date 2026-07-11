@@ -2,8 +2,6 @@ import importlib
 import os
 import threading
 
-LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "8000"))
-
 _PROVIDERS = {
     "llm": {
         "gemini": "integrations.llm.gemini.GeminiLLM",
