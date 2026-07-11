@@ -132,6 +132,14 @@ DATABASES = {
         "CONN_HEALTH_CHECKS": True,
         'OPTIONS': {
             'sslmode': 'verify-full',
+            # Explicit CA path. libpq's default (~/.postgresql/root.crt)
+            # depends on the running user's home dir, which differs between
+            # local dev (Windows), root, and the container's appuser.
+            **(
+                {'sslrootcert': os.environ['DATABASE_CERT_PATH']}
+                if os.environ.get('DATABASE_CERT_PATH')
+                else {}
+            ),
         }
     }
 }

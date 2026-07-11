@@ -4,7 +4,7 @@ set -e
 echo "🚀 Starting Application..."
 
 # Verify CockroachDB certificate
-DB_CERT_PATH="${DATABASE_CERT_PATH:-/root/.postgresql/root.crt}"
+DB_CERT_PATH="${DATABASE_CERT_PATH:-/app/root.crt}"
 if [ -f "$DB_CERT_PATH" ]; then
     echo "✅ CockroachDB certificate found"
 else
