@@ -25,7 +25,10 @@ WORKDIR /app
 # Copy dependency files FIRST (cache layer - changes infrequently)
 COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install all dependencies
+# Create virtual environment and install all dependencies.
+# UV_PROJECT_ENVIRONMENT is required: without it `uv sync` installs into
+# ./.venv and /opt/venv ships empty ("uvicorn: not found" at runtime).
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN uv sync --frozen --no-dev
@@ -63,8 +66,9 @@ COPY --from=app-deps /root/.postgresql/root.crt /app/root.crt
 # Copy application code (this layer changes frequently - LAST)
 COPY . .
 
-# Pre-collect static files during build (not at runtime)
-RUN python manage.py collectstatic --noinput --clear || echo "Static collection skipped"
+# Pre-collect static files during build (not at runtime). No fallback: a
+# failure here means the image is broken (e.g. deps missing) — fail the build.
+RUN python manage.py collectstatic --noinput --clear
 
 # Precompile the application code too (cold starts read .pyc instead of compiling)
 RUN python -m compileall -q /app
