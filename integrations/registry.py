@@ -34,6 +34,10 @@ _PROVIDERS = {
         "ga4": "integrations.analytics.ga4.GA4AnalyticsFetcher",
         "noop": "integrations.analytics.noop.NoopAnalyticsFetcher",
     },
+    "payment": {
+        "paddle": "integrations.payment.paddle.PaddlePayment",
+        "noop": "integrations.payment.noop.NoopPayment",
+    },
 }
 
 _singletons: dict = {}
@@ -88,3 +92,7 @@ def get_oauth():
 
 def get_analytics():
     return _get("analytics", "ANALYTICS_PROVIDER", "ga4")
+
+
+def get_payment():
+    return _get("payment", "PAYMENT_PROVIDER", "paddle")

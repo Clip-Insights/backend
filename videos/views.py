@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from billing.services import check_quota, estimate_tokens, record_usage
 from integrations.registry import LLM_MAX_OUTPUT_TOKENS
 from videos.serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
 from videos.services.chat import build_chat_stream
@@ -13,6 +14,10 @@ from videos.services.summarize import generate_summary
 from videos.services.transcribe import transcribe_youtube
 
 logger = logging.getLogger(__name__)
+
+# Estimated prompt-side tokens per chat turn (retrieved chunks + history +
+# instructions) — chat is metered on this plus the measured streamed output.
+CHAT_CONTEXT_TOKEN_ESTIMATE = 1500
 
 
 class ChatView(APIView):
@@ -33,12 +38,30 @@ class ChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Server-side quota (signed-in users). Anonymous requests keep the
+        # legacy client-side limits so the extension is not broken.
+        user = request.user if request.user.is_authenticated else None
+        if user:
+            allowed, info = check_quota(user, "chat")
+            if not allowed:
+                return Response({"success": False, "error": "quota_exceeded", **info},
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         def generate_streaming_response():
+            streamed_chars = 0
             try:
-                yield from build_chat_stream(youtube_url, user_query, transcription, chat_history)
+                for chunk in build_chat_stream(youtube_url, user_query, transcription, chat_history):
+                    streamed_chars += len(chunk)
+                    yield chunk
             except Exception as e:
                 logger.error("Error during chat streaming: %s", e)
                 yield "data: Something went wrong\n\n"
+            finally:
+                if user:
+                    tokens = (CHAT_CONTEXT_TOKEN_ESTIMATE
+                              + estimate_tokens(user_query)
+                              + streamed_chars // 3)
+                    record_usage(user, "chat", tokens)
 
         response = StreamingHttpResponse(
             generate_streaming_response(), content_type="text/event-stream"
@@ -65,8 +88,18 @@ class SummaryView(APIView):
         if not transcript:
             return Response({"transcription": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
 
+        user = request.user if request.user.is_authenticated else None
+        if user:
+            allowed, info = check_quota(user, "summary")
+            if not allowed:
+                return Response({"success": False, "error": "quota_exceeded", **info},
+                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         try:
             data, http_status = generate_summary(youtube_url, transcript, slice_time)
+            if user and http_status == 200:
+                generated = data.get("summary", "") + " ".join(data.get("keypoints", []))
+                record_usage(user, "summary", estimate_tokens(transcript) + estimate_tokens(generated))
             return JsonResponse(data, status=http_status)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
