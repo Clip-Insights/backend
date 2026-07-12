@@ -210,8 +210,8 @@ EMAIL_HOST_USER = os.getenv("EMAIL_USERNAME")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
-# Default sender — keep it tied to the authenticated SMTP user so it never
-# drifts from the credentials (Gmail rejects a From it doesn't own).
+# Sender address: SMTP login user by default; for Resend set DEFAULT_FROM_EMAIL
+# to a verified domain address (e.g. ClipInsights <noreply@yourdomain.com>).
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 # Fail fast instead of hanging if the SMTP server is unreachable.
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", 15))
