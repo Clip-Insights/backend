@@ -80,6 +80,7 @@ class ChatViewTests(APITestCase):
         self.assertEqual(data["code"], "limit_exceeded")
         self.assertEqual(data["reason"], "daily_chat_limit")
         self.assertEqual(data["cta"], "upgrade")
+        self.assertIsNotNone(data["resets_at"])  # clients render this in local time
 
     @patch("videos.views.build_chat_stream", return_value=iter(["data: ok\n\n", "data: [DONE]\n\n"]))
     def test_oversized_query_is_truncated_not_rejected(self, mock_stream):

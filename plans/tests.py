@@ -1,5 +1,5 @@
 """Tests for plan resolution, daily-limit enforcement and the plans API."""
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -9,9 +9,11 @@ from rest_framework.test import APITestCase
 
 from plans.models import Plan, UsageEvent, UserPlan
 from plans.services import (
+    USAGE_WINDOW,
     LimitExceeded,
     enforce_daily_limit,
     get_plan_for,
+    limit_resets_at,
     record_usage,
     remaining,
     usage_summary,
@@ -89,16 +91,34 @@ class DailyLimitTests(APITestCase):
             enforce_daily_limit(self.user, self.free, UsageEvent.KIND_SUMMARY)
         self.assertEqual(ctx.exception.detail["reason"], "daily_summary_limit")
         self.assertEqual(ctx.exception.detail["cta"], "upgrade")
+        # All events were just recorded, so the oldest expires ~24h from now.
+        resets_at = datetime.fromisoformat(ctx.exception.detail["resets_at"])
+        self.assertAlmostEqual(resets_at, now() + USAGE_WINDOW, delta=timedelta(minutes=1))
 
     def test_zero_limit_means_feature_off(self):
         with self.assertRaises(LimitExceeded) as ctx:
             enforce_daily_limit(self.user, self.guest, UsageEvent.KIND_CHAT)
         self.assertEqual(ctx.exception.detail["reason"], "chat_not_available")
+        # Waiting never unlocks a feature the plan doesn't include.
+        self.assertNotIn("resets_at", ctx.exception.detail)
 
     def test_events_outside_window_do_not_count(self):
         record_usage(self.user, UsageEvent.KIND_SUMMARY)
         UsageEvent.objects.update(created_at=now() - timedelta(hours=25))
         self.assertEqual(remaining(self.user, self.free, UsageEvent.KIND_SUMMARY), self.free.daily_summaries)
+
+    def test_resets_at_skips_surplus_events_when_over_limit(self):
+        # An admin lowering a plan's limit can leave a user over it; the next
+        # allowance then also needs the surplus (oldest) events to expire.
+        for _ in range(3):
+            record_usage(self.user, UsageEvent.KIND_SUMMARY)
+        for event, hours_ago in zip(UsageEvent.objects.order_by("pk"), (3, 2, 1)):
+            UsageEvent.objects.filter(pk=event.pk).update(created_at=now() - timedelta(hours=hours_ago))
+
+        # 3 used vs a limit of 2: skip one, so the reset follows the 2h-old event.
+        resets_at = limit_resets_at(self.user, UsageEvent.KIND_SUMMARY, skip=1)
+        expected = now() - timedelta(hours=2) + USAGE_WINDOW
+        self.assertAlmostEqual(resets_at, expected, delta=timedelta(minutes=1))
 
     def test_usage_summary_shape(self):
         record_usage(self.user, UsageEvent.KIND_CHAT)
@@ -108,6 +128,10 @@ class DailyLimitTests(APITestCase):
         self.assertEqual(summary["chat"]["remaining"], self.free.daily_chat_messages - 1)
         self.assertIn("summary", summary)
         self.assertNotIn("transcription", summary)
+        # resets_at tracks when `used` next decreases; null while unused.
+        self.assertIsNone(summary["summary"]["resets_at"])
+        resets_at = datetime.fromisoformat(summary["chat"]["resets_at"])
+        self.assertAlmostEqual(resets_at, now() + USAGE_WINDOW, delta=timedelta(minutes=1))
 
 
 class PlanEndpointTests(APITestCase):

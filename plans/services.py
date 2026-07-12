@@ -12,7 +12,7 @@ use IsAuthenticated, so they receive 401 and the clients show a sign-up prompt.
 """
 import logging
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.utils.timezone import now
 from rest_framework.exceptions import APIException
@@ -46,13 +46,22 @@ DAILY_LIMIT_FIELDS = {
 
 
 class LimitExceeded(APIException):
-    """Structured 429 so clients can render the right CTA without guessing."""
+    """Structured 429 so clients can render the right CTA without guessing.
+
+    `resets_at` is the UTC ISO-8601 moment the rolling window returns an
+    allowance; clients render it in the viewer's local timezone. It is omitted
+    (not null — DRF coerces None in detail dicts to the string 'None') when
+    waiting doesn't help (feature not in the plan, storage full).
+    """
 
     status_code = 429
     default_code = "limit_exceeded"
 
-    def __init__(self, reason: str, message: str, cta: str = "upgrade"):
-        super().__init__(detail={"code": "limit_exceeded", "reason": reason, "message": message, "cta": cta})
+    def __init__(self, reason: str, message: str, cta: str = "upgrade", resets_at: datetime | None = None):
+        detail = {"code": "limit_exceeded", "reason": reason, "message": message, "cta": cta}
+        if resets_at:
+            detail["resets_at"] = resets_at.isoformat()
+        super().__init__(detail=detail)
 
 
 def ensure_user_plan(user) -> UserPlan:
@@ -86,6 +95,23 @@ def usage_in_window(user, kind: str) -> int:
     return UsageEvent.objects.filter(user=user, kind=kind, created_at__gte=now() - USAGE_WINDOW).count()
 
 
+def limit_resets_at(user, kind: str, skip: int = 0) -> datetime | None:
+    """UTC moment the rolling window next returns an allowance for `kind`.
+
+    Allowances come back one at a time, exactly USAGE_WINDOW after each event,
+    so the next one frees up when the oldest counted event leaves the window.
+    `skip` ignores that many oldest events — used when consumption exceeds the
+    current limit (an admin lowered it), because the surplus events must
+    expire before the first free slot appears. None when nothing is counted.
+    """
+    oldest = list(
+        UsageEvent.objects.filter(user=user, kind=kind, created_at__gte=now() - USAGE_WINDOW)
+        .order_by("created_at")
+        .values_list("created_at", flat=True)[skip : skip + 1]
+    )
+    return oldest[0] + USAGE_WINDOW if oldest else None
+
+
 def enforce_daily_limit(user, plan: Plan, kind: str) -> None:
     """Raise LimitExceeded when the user has no allowance left for `kind`."""
     field, label = DAILY_LIMIT_FIELDS[kind]
@@ -95,13 +121,15 @@ def enforce_daily_limit(user, plan: Plan, kind: str) -> None:
             reason=f"{kind}_not_available",
             message=f"Your {plan.name} plan does not include {label}. Upgrade to unlock this feature.",
         )
-    if usage_in_window(user, kind) >= limit:
+    used = usage_in_window(user, kind)
+    if used >= limit:
         cta = "upgrade" if plan.slug != Plan.PREMIUM else "wait"
         raise LimitExceeded(
             reason=f"daily_{kind}_limit",
-            message=f"You have used all {limit} {label} for today. "
-            + ("Upgrade your plan for more, or try again later." if cta == "upgrade" else "Please try again later."),
+            message=f"You have used all {limit} {label} available in a 24-hour period."
+            + (" Upgrade your plan for more." if cta == "upgrade" else ""),
             cta=cta,
+            resets_at=limit_resets_at(user, kind, skip=used - limit),
         )
 
 
@@ -115,10 +143,20 @@ def remaining(user, plan: Plan, kind: str) -> int:
 
 
 def usage_summary(user, plan: Plan) -> dict:
-    """Per-kind {used, limit, remaining} map for the /plans/me/ endpoint."""
+    """Per-kind {used, limit, remaining, resets_at} map for /plans/me/.
+
+    `resets_at` (UTC ISO-8601, null when nothing is counted) is when `used`
+    next decreases, so clients can show when a depleted limit unblocks.
+    """
     summary = {}
     for kind, (field, _) in DAILY_LIMIT_FIELDS.items():
         limit = getattr(plan, field)
         used = usage_in_window(user, kind)
-        summary[kind] = {"used": used, "limit": limit, "remaining": max(0, limit - used)}
+        resets_at = limit_resets_at(user, kind)
+        summary[kind] = {
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used),
+            "resets_at": resets_at.isoformat() if resets_at else None,
+        }
     return summary

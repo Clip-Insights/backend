@@ -56,7 +56,7 @@ Pro subscribers or 20 Premium subscribers cover them with margin to spare.
 
 | Limit | Enforced | How |
 |---|---|---|
-| Daily summaries / chats | Backend | `plans.services.enforce_daily_limit` — rolling 24h count of `UsageEvent` rows; structured 429 with `{code, reason, message, cta}`; charged only on success |
+| Daily summaries / chats | Backend | `plans.services.enforce_daily_limit` — rolling 24h count of `UsageEvent` rows; structured 429 with `{code, reason, message, cta, resets_at}` where `resets_at` (UTC ISO, also on each `/plans/me/` usage counter; omitted when waiting doesn't help) is when the window frees an allowance — clients render it in the viewer's timezone; charged only on success |
 | Chat query length | Backend | truncated (not rejected) to `max_chat_query_chars`; clients warn on paste |
 | Transcript token budget ("video token limit") | Backend + client | `GET /api/videos/tokenlimit/` now returns the *caller's plan* budget; server also truncates defensively |
 | Storage + per-file size | Backend | checked before S3 upload; cap comes from the plan (replaces `User.allocated_space`) |
