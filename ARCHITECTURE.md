@@ -78,7 +78,7 @@ Key environment variables:
 | `EMBEDDING_DIMENSIONS` (default `768`) | optional vector size passed to the embeddings API |
 | `TRANSCRIPTION_PROVIDER` (default `groq`), `GROQ_API_KEYS` | Whisper transcription |
 | `STORAGE_PROVIDER` (default `s3`) + AWS creds/bucket | object storage |
-| `EMAIL_PROVIDER` (default `smtp`) + `EMAIL_*` | transactional email |
+| `EMAIL_PROVIDER` (default `smtp`) + `EMAIL_*` / `RESEND_API_KEY` | transactional email (`smtp` \| `console` \| `resend`) |
 | `OAUTH_PROVIDER` (default `google`), `GOOGLE_CLIENT_ID` | Google sign-in |
 | `ANALYTICS_PROVIDER` (default `ga4`) | analytics fetcher |
 | `IMAGE_TAG` | reported by `/health/` |
@@ -99,7 +99,7 @@ get_transcription()  # TRANSCRIPTION_PROVIDER → groq
 get_embeddings()     # EMBEDDING_PROVIDER     → fireworks | gemini | noop
 get_vectorstore()    # VECTORSTORE_PROVIDER   → cockroach | memory
 get_storage()        # STORAGE_PROVIDER       → s3
-get_email()          # EMAIL_PROVIDER         → smtp | console
+get_email()          # EMAIL_PROVIDER         → smtp | console | resend
 get_oauth()          # OAUTH_PROVIDER         → google
 get_analytics()      # ANALYTICS_PROVIDER     → ga4 | noop
 ```

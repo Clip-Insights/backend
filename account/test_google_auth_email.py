@@ -1,11 +1,11 @@
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from integrations.email.gmail_api import GmailApiEmailSender
+from integrations.email.resend import ResendEmailSender
 from integrations.oauth.google import GoogleOAuthVerifier
 
 User = get_user_model()
@@ -95,24 +95,25 @@ class ResendVerificationViewTests(APITestCase):
         mock_send.assert_not_called()
 
 
-class GmailApiEmailSenderTests(TestCase):
-    @patch("integrations.email.gmail_api.build")
-    def test_send_calls_gmail_api(self, mock_build):
-        mock_service = MagicMock()
-        mock_build.return_value = mock_service
-
-        with patch.dict(
-            "os.environ",
-            {
-                "GMAIL_REFRESH_TOKEN": "refresh",
-                "GMAIL_CLIENT_ID": "cid",
-                "GMAIL_CLIENT_SECRET": "secret",
-            },
-        ):
-            GmailApiEmailSender().send(
+class ResendEmailSenderTests(TestCase):
+    @patch("integrations.email.resend.resend.Emails.send")
+    @patch("integrations.email.resend.settings.DEFAULT_FROM_EMAIL", "noreply@example.com")
+    def test_send_calls_resend_sdk(self, mock_send):
+        with patch.dict("os.environ", {"RESEND_API_KEY": "re_test"}):
+            ResendEmailSender().send(
                 to="user@example.com",
                 subject="Hello",
                 body="Body",
             )
 
-        mock_service.users().messages().send.assert_called_once()
+        mock_send.assert_called_once_with(
+            {
+                "from": "noreply@example.com",
+                "to": ["user@example.com"],
+                "subject": "Hello",
+                "text": "Body",
+            }
+        )
+        import resend as resend_sdk
+
+        self.assertEqual(resend_sdk.api_key, "re_test")

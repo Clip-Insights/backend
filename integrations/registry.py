@@ -26,7 +26,7 @@ _PROVIDERS = {
     "email": {
         "smtp": "integrations.email.smtp.SMTPEmailSender",
         "console": "integrations.email.console.ConsoleEmailSender",
-        "gmail_api": "integrations.email.gmail_api.GmailApiEmailSender",
+        "resend": "integrations.email.resend.ResendEmailSender",
     },
     "oauth": {
         "google": "integrations.oauth.google.GoogleOAuthVerifier",
