@@ -4,6 +4,7 @@ import threading
 
 _PROVIDERS = {
     "llm": {
+        "fireworks": "integrations.llm.fireworks.FireworksLLM",
         "gemini": "integrations.llm.gemini.GeminiLLM",
         "noop": "integrations.llm.noop.NoopLLM",
     },
@@ -11,6 +12,7 @@ _PROVIDERS = {
         "groq": "integrations.transcription.groq_whisper.GroqWhisperTranscription",
     },
     "embedding": {
+        "fireworks": "integrations.embeddings.fireworks.FireworksEmbeddings",
         "gemini": "integrations.embeddings.gemini.GeminiEmbeddings",
         "noop": "integrations.embeddings.noop.NoopEmbeddings",
     },
@@ -24,7 +26,7 @@ _PROVIDERS = {
     "email": {
         "smtp": "integrations.email.smtp.SMTPEmailSender",
         "console": "integrations.email.console.ConsoleEmailSender",
-        "gmail_api": "integrations.email.gmail_api.GmailApiEmailSender",
+        "resend": "integrations.email.resend.ResendEmailSender",
     },
     "oauth": {
         "google": "integrations.oauth.google.GoogleOAuthVerifier",
@@ -58,7 +60,7 @@ def _get(kind: str, env_var: str, default: str):
 
 
 def get_llm():
-    return _get("llm", "LLM_PROVIDER", "gemini")
+    return _get("llm", "LLM_PROVIDER", "fireworks")
 
 
 def get_transcription():
@@ -66,7 +68,7 @@ def get_transcription():
 
 
 def get_embeddings():
-    return _get("embedding", "EMBEDDING_PROVIDER", "gemini")
+    return _get("embedding", "EMBEDDING_PROVIDER", "fireworks")
 
 
 def get_vectorstore():

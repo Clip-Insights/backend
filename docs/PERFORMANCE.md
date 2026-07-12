@@ -37,8 +37,7 @@ import numbers by roughly 3-10x because startup CPU is throttled).
 
 ## Where the remaining latency lives
 
-Summary/chat time is now dominated by the LLM itself. The switch to
-`gemini-3-flash-preview` (2.5-flash retiring) and working embeddings
-(`gemini-embedding-001`) means chat streams its first token after
-~1 embedding call + model time-to-first-token. If more speed is needed,
-`LLM_MODEL=gemini-3.1-flash-lite` is markedly faster for chat-sized replies.
+Summary/chat time is now dominated by the LLM itself. Fireworks defaults
+(`LLM_MODEL` / `EMBEDDING_MODEL`) mean chat streams its first token after
+~1 embedding call + model time-to-first-token. Swap models via env for
+hackathons without code changes.

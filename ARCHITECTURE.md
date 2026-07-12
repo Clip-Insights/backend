@@ -11,9 +11,9 @@ The backend is a **Django + Django REST Framework** API that powers two clients:
 - the **browser extension** (`clip-insights-ext`), which augments YouTube watch pages with AI summaries, key points, and a chat-about-the-video feature; and
 - the **web app** (`clip-insights-fe`), an account dashboard where users sign in and manage the PDFs they export from the extension (files, folders, storage).
 
-The API is stateless HTTP/JSON. AI generation is delegated to Google Gemini; long-running audio transcription to Groq Whisper; file storage to S3; transactional email to SMTP. Every such third party sits behind a **provider abstraction** so it can be swapped without touching feature code.
+The API is stateless HTTP/JSON. AI generation is delegated to **Fireworks AI** (AMD GPUs; OpenAI-compatible API) by default, with Google Gemini as an optional LLM fallback; long-running audio transcription to Groq Whisper; file storage to S3; transactional email to SMTP. Every such third party sits behind a **provider abstraction** so it can be swapped without touching feature code.
 
-> **Chat uses RAG.** The extension sends the (token-budget-sliced) transcript with each chat request. The backend chunks it, embeds the chunks with **Gemini embeddings**, stores them in a **CockroachDB pgvector** vector store keyed by `youtube_url` (embedding once per video), and retrieves only the **top-3 most relevant chunks** to feed the model — never the whole transcript. Embeddings (`EMBEDDING_PROVIDER`) and the vector store (`VECTORSTORE_PROVIDER`) are swappable providers like every other integration; if retrieval fails (e.g. a CockroachDB older than v25.1 without vector support), chat falls back to a bounded slice of the transcript so it degrades gracefully instead of breaking.
+> **Chat uses RAG.** The extension sends the (token-budget-sliced) transcript with each chat request. The backend chunks it, embeds the chunks with **Fireworks embeddings** (default `nomic-ai/nomic-embed-text-v1.5`), stores them in a **CockroachDB pgvector** vector store keyed by `youtube_url` (embedding once per video), and retrieves only the **top-3 most relevant chunks** to feed the model — never the whole transcript. Embeddings (`EMBEDDING_PROVIDER`) and the vector store (`VECTORSTORE_PROVIDER`) are swappable providers like every other integration; if retrieval fails (e.g. a CockroachDB older than v25.1 without vector support), chat falls back to a bounded slice of the transcript so it degrades gracefully instead of breaking.
 
 ---
 
@@ -24,7 +24,8 @@ The API is stateless HTTP/JSON. AI generation is delegated to Google Gemini; lon
 | Language / runtime | Python 3.13 |
 | Web framework | Django 6, Django REST Framework |
 | Auth | DRF SimpleJWT (access/refresh), custom `account.User`, Google OAuth |
-| LLM | Google Gemini via `langchain-google-genai` (stream/complete) + `instructor` (structured output) |
+| LLM | Fireworks AI via OpenAI SDK (stream/complete/chat) + `instructor` (structured); optional Gemini via `langchain-google-genai` |
+| Embeddings | Fireworks AI OpenAI-compatible `/embeddings` (default); optional Gemini (`gemini-embedding-001`) |
 | Transcription | Groq Whisper (`groq`) |
 | Object storage | AWS S3 (`boto3`) |
 | Database | CockroachDB (`django-cockroachdb` + `psycopg`) |
@@ -67,12 +68,17 @@ Key environment variables:
 |---|---|
 | `DJANGO_ENV` | `production` disables DEBUG |
 | `DATABASE_NAME/USER/PASSWORD/HOST/PORT` | CockroachDB connection (sslmode `verify-full`) |
-| `LLM_PROVIDER` (default `gemini`) | which LLM provider the registry resolves |
-| `LLM_API_KEYS` | comma-separated Gemini keys, rotated round-robin |
-| `LLM_MODEL` (default `gemini-2.5-flash`), `LLM_TEMPERATURE`, `LLM_MAX_OUTPUT_TOKENS` | LLM tuning |
+| `LLM_PROVIDER` (default `fireworks`) | which LLM provider the registry resolves (`fireworks` \| `gemini` \| `noop`) |
+| `FIREWORKS_API_KEYS` | comma-separated Fireworks keys, rotated round-robin (shared by LLM + embeddings) |
+| `FIREWORKS_BASE_URL` | Fireworks inference base URL (default `https://api.fireworks.ai/inference/v1`) |
+| `LLM_MODEL` (default `accounts/fireworks/models/deepseek-v4-flash`), `LLM_TEMPERATURE`, `LLM_MAX_OUTPUT_TOKENS` | LLM tuning (model id is env-swappable for hackathons) |
+| `LLM_API_KEYS` | comma-separated Gemini keys when `LLM_PROVIDER=gemini` |
+| `EMBEDDING_PROVIDER` (default `fireworks`) | `fireworks` \| `gemini` \| `noop` |
+| `EMBEDDING_MODEL` (default `nomic-ai/nomic-embed-text-v1.5`) | embedding model id (env-swappable) |
+| `EMBEDDING_DIMENSIONS` (default `768`) | optional vector size passed to the embeddings API |
 | `TRANSCRIPTION_PROVIDER` (default `groq`), `GROQ_API_KEYS` | Whisper transcription |
 | `STORAGE_PROVIDER` (default `s3`) + AWS creds/bucket | object storage |
-| `EMAIL_PROVIDER` (default `smtp`) + `EMAIL_*` | transactional email |
+| `EMAIL_PROVIDER` (default `smtp`) + `EMAIL_*` / `RESEND_API_KEY` | transactional email (`smtp` \| `console` \| `resend`) |
 | `OAUTH_PROVIDER` (default `google`), `GOOGLE_CLIENT_ID` | Google sign-in |
 | `ANALYTICS_PROVIDER` (default `ga4`) | analytics fetcher |
 | `IMAGE_TAG` | reported by `/health/` |
@@ -88,12 +94,12 @@ Logging: a rotating file handler writes daily logs under `logs/` (50 MB × 10) p
 `integrations/registry.py` is a small dependency-injection container. It maps a *kind* + a *provider name* (from an env var) to a dotted class path, lazily imports and instantiates it once (thread-safe singleton), and hands it back through a `get_<kind>()` accessor.
 
 ```python
-get_llm()            # LLM_PROVIDER           → gemini | noop
+get_llm()            # LLM_PROVIDER           → fireworks | gemini | noop
 get_transcription()  # TRANSCRIPTION_PROVIDER → groq
-get_embeddings()     # EMBEDDING_PROVIDER     → gemini | noop
+get_embeddings()     # EMBEDDING_PROVIDER     → fireworks | gemini | noop
 get_vectorstore()    # VECTORSTORE_PROVIDER   → cockroach | memory
 get_storage()        # STORAGE_PROVIDER       → s3
-get_email()          # EMAIL_PROVIDER         → smtp | console
+get_email()          # EMAIL_PROVIDER         → smtp | console | resend
 get_oauth()          # OAUTH_PROVIDER         → google
 get_analytics()      # ANALYTICS_PROVIDER     → ga4 | noop
 ```
@@ -115,7 +121,14 @@ Provider contracts:
 
 The `noop` LLM (`integrations/llm/noop.py`) returns canned responses and is used in tests/smoke runs.
 
-### Gemini provider (`integrations/llm/gemini.py`)
+### Fireworks providers (default)
+
+- **LLM** (`integrations/llm/fireworks.py`): OpenAI SDK against `FIREWORKS_BASE_URL`; `structured` uses **`instructor.from_openai`**. Model from `LLM_MODEL`.
+- **Embeddings** (`integrations/embeddings/fireworks.py`): same client; model from `EMBEDDING_MODEL`. Exposes `model_id` for RAG cache keys. Nomic models get `search_document:` / `search_query:` prefixes.
+- **Gemini embeddings** (`integrations/embeddings/gemini.py`): `google.generativeai.embed_content` with `retrieval_document` / `retrieval_query` task types; keys from `LLM_API_KEYS`.
+- Keys from `FIREWORKS_API_KEYS` via `integrations.fireworks` + `APIKeyManager` (Fireworks LLM/embeddings).
+
+### Gemini LLM (`integrations/llm/gemini.py`) — optional fallback
 
 - `complete`/`stream` use LangChain's `ChatGoogleGenerativeAI`.
 - `structured` uses **`instructor.from_gemini(... mode=GEMINI_JSON)`** to constrain Gemini to a Pydantic `response_model` and parse the reply into it — no manual JSON/regex.
@@ -188,7 +201,7 @@ Pulls Google Analytics (GA4) data via `get_analytics().fetch_and_store()` (prope
 3. **Chat:** `POST /chat/ {youtube_url, query, transcription, chat_history}` → `build_chat_stream` → chunk + embed transcript (once per video) → retrieve top-3 chunks → SSE tokens → `[DONE]`.
 4. **Audio fallback:** `POST /transcribe/ {youtube_url, duration}` → yt-dlp → Whisper → cached `VideoTranscripts`.
 
-Chat retrieves the top-3 transcript chunks server-side (Gemini embeddings + CockroachDB pgvector); the model only ever sees those chunks plus the last 3 history messages, not the full transcript.
+Chat retrieves the top-3 transcript chunks server-side (Fireworks embeddings + CockroachDB pgvector); the model only ever sees those chunks plus the last 3 history messages, not the full transcript.
 
 ---
 
@@ -207,12 +220,12 @@ Chat retrieves the top-3 transcript chunks server-side (Gemini embeddings + Cock
 1. **app-deps** — installs dependencies from `pyproject.toml`/`uv.lock` with `uv sync --frozen --no-dev` into `/opt/venv`, and downloads the CockroachDB cert.
 2. **production** — copies the venv + cert + app code, runs `collectstatic`, drops to a non-root user, and starts via `entrypoint.sh` (verifies the DB cert, then `uvicorn core.asgi:application`). A `HEALTHCHECK` hits `/health/`.
 
-> The old build had a separate model-downloader stage that baked a ~90 MB sentence-transformers model into the image. RAG now uses **Gemini embeddings** (a hosted API call, no local model), so that stage stays gone and the image carries none of the heavy ML stack (torch/sentence-transformers/transformers/scikit-learn). Embeddings need only `google-generativeai`, already a dependency for the LLM.
+> The old build had a separate model-downloader stage that baked a ~90 MB sentence-transformers model into the image. RAG now uses **Fireworks embeddings** (a hosted API call, no local model), so that stage stays gone and the image carries none of the heavy ML stack (torch/sentence-transformers/transformers/scikit-learn). Embeddings need only the `openai` SDK (shared with the Fireworks LLM).
 
 ---
 
 ## 10. Removed / legacy
 
-- **RAG pipeline** is active again, but rebuilt leaner than the original: Gemini embeddings instead of local sentence-transformers (no torch/ML stack), and a CockroachDB vector store that reuses Django's DB connection with raw `VECTOR`/`<=>` SQL (`integrations/vectorstore/cockroach.py`) instead of the old SQLAlchemy/`langchain-postgres` wrapper + separate connection string. The legacy `_LazyProxy`/background warm-up, `videos/ai_config.py`, and `utils/cockroachdb_vectorstore.py` were **not** restored.
+- **RAG pipeline** is active again, but rebuilt leaner than the original: hosted Fireworks embeddings instead of local sentence-transformers (no torch/ML stack), and a CockroachDB vector store that reuses Django's DB connection with raw `VECTOR`/`<=>` SQL (`integrations/vectorstore/cockroach.py`) instead of the old SQLAlchemy/`langchain-postgres` wrapper + separate connection string. The legacy `_LazyProxy`/background warm-up, `videos/ai_config.py`, and `utils/cockroachdb_vectorstore.py` were **not** restored.
 - **Summary DB caching**: earlier the summary was cached by URL (which could "poison" a video with a bad early transcript). The current `summarize.py` does **not** cache — every request generates fresh from the supplied transcript.
 - `Dockerfile_old` remains as a historical reference and is not used.
