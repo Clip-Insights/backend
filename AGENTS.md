@@ -11,6 +11,7 @@ Django REST API for video and PDF insights: transcription, summarization, RAG ch
 | `backend/account/` | JWT auth, Google OAuth, email |
 | `backend/files/` | User file storage (was `userspace`) |
 | `backend/videos/` | Transcribe, summarize, chat (was `textutils`) |
+| `backend/plans/` | Plans, per-user usage limits & enforcement (guest/free/pro/premium) |
 | `backend/analytics/` | GA4 ingest via management command |
 | `backend/integrations/` | Swappable external services (Protocol + env registry) |
 | `backend/utils/` | Shared non-integration utilities (logger) |

@@ -1,26 +1,26 @@
 import logging
 
-import yt_dlp
 from django.http import JsonResponse, StreamingHttpResponse
 from rest_framework import status
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.services import check_quota, estimate_tokens, record_usage
-from integrations.registry import LLM_MAX_OUTPUT_TOKENS
-from videos.serializers import ChatInputSerializer, SummaryInputSerializer, TranscribeInputSerializer
+from plans.models import UsageEvent
+from plans.services import enforce_daily_limit, get_plan_for, record_usage
+from videos.serializers import ChatInputSerializer, SummaryInputSerializer
 from videos.services.chat import build_chat_stream
 from videos.services.summarize import generate_summary
-from videos.services.transcribe import transcribe_youtube
 
 logger = logging.getLogger(__name__)
 
-# Estimated prompt-side tokens per chat turn (retrieved chunks + history +
-# instructions) — chat is metered on this plus the measured streamed output.
-CHAT_CONTEXT_TOKEN_ESTIMATE = 1500
+# Estimated characters per LLM token, shared with clients via TokenLimitView.
+CHARS_PER_TOKEN = 3
 
 
 class ChatView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
         serializer = ChatInputSerializer(data=request.data)
         if not serializer.is_valid():
@@ -38,30 +38,26 @@ class ChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Server-side quota (signed-in users). Anonymous requests keep the
-        # legacy client-side limits so the extension is not broken.
-        user = request.user if request.user.is_authenticated else None
-        if user:
-            allowed, info = check_quota(user, "chat")
-            if not allowed:
-                return Response({"success": False, "error": "quota_exceeded", **info},
-                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+        plan = get_plan_for(request.user)
+        enforce_daily_limit(request.user, plan, UsageEvent.KIND_CHAT)
+
+        # Oversized input is truncated, not rejected: the user still gets an
+        # answer and the client warns about the cut (see product requirement).
+        user_query = user_query[: plan.max_chat_query_chars]
+        transcript_budget_chars = plan.transcript_token_budget * CHARS_PER_TOKEN
+        if transcription:
+            transcription = transcription[:transcript_budget_chars]
+
+        user = request.user
 
         def generate_streaming_response():
-            streamed_chars = 0
             try:
-                for chunk in build_chat_stream(youtube_url, user_query, transcription, chat_history):
-                    streamed_chars += len(chunk)
-                    yield chunk
+                yield from build_chat_stream(youtube_url, user_query, transcription, chat_history)
+                # Charge only after a completed stream so provider failures are free.
+                record_usage(user, UsageEvent.KIND_CHAT)
             except Exception as e:
                 logger.error("Error during chat streaming: %s", e)
                 yield "data: Something went wrong\n\n"
-            finally:
-                if user:
-                    tokens = (CHAT_CONTEXT_TOKEN_ESTIMATE
-                              + estimate_tokens(user_query)
-                              + streamed_chars // 3)
-                    record_usage(user, "chat", tokens)
 
         response = StreamingHttpResponse(
             generate_streaming_response(), content_type="text/event-stream"
@@ -73,6 +69,8 @@ class ChatView(APIView):
 
 
 class SummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
         serializer = SummaryInputSerializer(data=request.data)
         if not serializer.is_valid():
@@ -88,50 +86,30 @@ class SummaryView(APIView):
         if not transcript:
             return Response({"transcription": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user if request.user.is_authenticated else None
-        if user:
-            allowed, info = check_quota(user, "summary")
-            if not allowed:
-                return Response({"success": False, "error": "quota_exceeded", **info},
-                                status=status.HTTP_429_TOO_MANY_REQUESTS)
+        plan = get_plan_for(request.user)
+        enforce_daily_limit(request.user, plan, UsageEvent.KIND_SUMMARY)
+        transcript = transcript[: plan.transcript_token_budget * CHARS_PER_TOKEN]
 
         try:
             data, http_status = generate_summary(youtube_url, transcript, slice_time)
-            if user and http_status == 200:
-                generated = data.get("summary", "") + " ".join(data.get("keypoints", []))
-                record_usage(user, "summary", estimate_tokens(transcript) + estimate_tokens(generated))
+            if http_status == 200:
+                record_usage(request.user, UsageEvent.KIND_SUMMARY)
             return JsonResponse(data, status=http_status)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TokenLimitView(APIView):
+    """Transcript token budget for the caller's plan (guest plan when anonymous).
+
+    Clients use this to slice transcripts before sending them to AI endpoints.
+    """
+
+    permission_classes = [AllowAny]
+
     def get(self, request):
-        return JsonResponse({"tokens": LLM_MAX_OUTPUT_TOKENS, "charPerToken": 3}, status=status.HTTP_200_OK)
-
-
-class TranscribeView(APIView):
-    def post(self, request, *args, **kwargs):
-        serializer = TranscribeInputSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        validated_data = serializer.validated_data
-        youtube_url = validated_data.get("youtube_url")
-        duration = validated_data.get("duration", 300)
-
-        if not youtube_url:
-            return Response({"youtube_url": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            result = transcribe_youtube(youtube_url, duration=duration)
-            return Response(result, status=status.HTTP_200_OK)
-        except ValueError as e:
-            return Response({"youtube_url": [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
-        except FileNotFoundError as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except yt_dlp.utils.DownloadError:
-            return Response({"error": "Failed to download audio"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        except Exception as e:
-            logger.error("Transcription failed: %s", e)
-            return Response({"error": "Transcription failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        plan = get_plan_for(request.user)
+        return JsonResponse(
+            {"tokens": plan.transcript_token_budget, "charPerToken": CHARS_PER_TOKEN},
+            status=status.HTTP_200_OK,
+        )

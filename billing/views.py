@@ -6,56 +6,58 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from billing.models import Plan, Subscription
-from billing.serializers import CheckoutInputSerializer, PlanSerializer
-from billing.services import get_active_plan, get_usage
+from billing.models import PaddlePlanMap, Subscription
+from billing.serializers import CheckoutInputSerializer
 from integrations.registry import get_payment
+from plans.models import Plan
 
 logger = logging.getLogger(__name__)
 
 
-class PlanListView(APIView):
-    """Public catalog for the pricing page."""
+class BillingCatalogView(APIView):
+    """Purchase metadata for the pricing page: which plans are buyable, their
+    annual price, and the Paddle price ids. Plan limits come from /api/plans/."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-        plans = Plan.objects.filter(is_active=True)
-        return Response({"plans": PlanSerializer(plans, many=True).data})
+        catalog = [
+            {
+                "plan_slug": m.plan.slug,
+                "monthly_price_usd": float(m.plan.monthly_price_usd),
+                "annual_price_usd": float(m.annual_price_usd),
+                "paddle_price_id_monthly": m.paddle_price_id_monthly,
+                "paddle_price_id_annual": m.paddle_price_id_annual,
+            }
+            for m in PaddlePlanMap.objects.filter(plan__is_active=True).select_related("plan")
+        ]
+        return Response({"catalog": catalog})
 
 
 class SubscriptionView(APIView):
-    """The signed-in user's effective plan, subscription state, and usage."""
+    """The signed-in user's Paddle subscription state (plan/usage: /api/plans/me/)."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        plan = get_active_plan(request.user)
         subscription = Subscription.objects.filter(user=request.user).select_related("plan").first()
-        usage = get_usage(request.user) if plan else None
         return Response({
-            "plan": PlanSerializer(plan).data if plan else None,
             "subscription": {
+                "plan_slug": subscription.plan.slug,
                 "status": subscription.status,
                 "billing_cycle": subscription.billing_cycle,
                 "current_period_end": subscription.current_period_end,
                 "cancel_at_period_end": subscription.cancel_at_period_end,
             } if subscription else None,
-            "usage": {
-                "summaries_used": usage.summaries_used,
-                "chats_used": usage.chats_used,
-                "tokens_used": usage.tokens_used,
-                "period": usage.period,
-            } if usage else None,
         })
 
 
 class CheckoutConfigView(APIView):
     """Everything Paddle.js needs to open the overlay checkout for a plan.
 
-    No server-side transaction is created: with Paddle Billing the browser
-    opens the checkout with a price id, and the webhook brings the resulting
-    subscription back to us (with our user id in custom_data).
+    No server-side transaction is created: the browser opens the checkout with
+    a price id, and the webhook brings the resulting subscription back to us
+    (with our user id in custom_data).
     """
 
     permission_classes = [IsAuthenticated]
@@ -64,16 +66,17 @@ class CheckoutConfigView(APIView):
         serializer = CheckoutInputSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        plan_code = serializer.validated_data["plan_code"]
+        plan_slug = serializer.validated_data["plan_code"]
         cycle = serializer.validated_data["billing_cycle"]
 
-        plan = Plan.objects.filter(code=plan_code, is_active=True).first()
-        if plan is None:
-            return Response({"plan_code": ["Unknown plan."]}, status=status.HTTP_400_BAD_REQUEST)
-        if plan.code == "free":
-            return Response({"plan_code": ["The free plan needs no checkout."]}, status=status.HTTP_400_BAD_REQUEST)
+        plan = Plan.objects.filter(slug=plan_slug, is_active=True).first()
+        if plan is None or plan.monthly_price_usd <= 0:
+            return Response({"plan_code": ["This plan cannot be purchased."]}, status=status.HTTP_400_BAD_REQUEST)
 
-        price_id = plan.paddle_price_id_monthly if cycle == "monthly" else plan.paddle_price_id_annual
+        mapping = PaddlePlanMap.objects.filter(plan=plan).first()
+        price_id = mapping and (
+            mapping.paddle_price_id_monthly if cycle == "monthly" else mapping.paddle_price_id_annual
+        )
         if not price_id:
             return Response(
                 {"error": "This plan is not synced with Paddle yet. Run `manage.py setup_billing`."},

@@ -25,10 +25,18 @@ WORKDIR /app
 # Copy dependency files FIRST (cache layer - changes infrequently)
 COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install all dependencies
+# Create virtual environment and install all dependencies.
+# UV_PROJECT_ENVIRONMENT is required: without it `uv sync` installs into
+# ./.venv and /opt/venv ships empty ("uvicorn: not found" at runtime).
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 RUN uv venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN uv sync --frozen --no-dev
+
+# Precompile dependency bytecode at build time. PYTHONDONTWRITEBYTECODE=1 means
+# nothing is cached at runtime, so without this every cold start re-compiles
+# every imported module. (|| true: some packages ship files that don't compile.)
+RUN python -m compileall -q /opt/venv || true
 
 # ============================================================
 # Stage 2: Final production image
@@ -50,18 +58,25 @@ WORKDIR /app
 COPY --from=app-deps /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy CockroachDB certificate
-COPY --from=app-deps /root/.postgresql/root.crt /root/.postgresql/root.crt
+# Copy CockroachDB certificate to a path readable by appuser. The Cloud Run
+# service sets DATABASE_CERT_PATH=/app/root.crt and settings.py passes it to
+# libpq as sslrootcert (the /root/... default is unreadable for appuser).
+COPY --from=app-deps /root/.postgresql/root.crt /app/root.crt
 
 # Copy application code (this layer changes frequently - LAST)
 COPY . .
 
-# Pre-collect static files during build (not at runtime)
-RUN python manage.py collectstatic --noinput --clear || echo "Static collection skipped"
+# Pre-collect static files during build (not at runtime). No fallback: a
+# failure here means the image is broken (e.g. deps missing) — fail the build.
+RUN python manage.py collectstatic --noinput --clear
 
-# Copy optimized entrypoint
+# Precompile the application code too (cold starts read .pyc instead of compiling)
+RUN python -m compileall -q /app
+
+# Copy optimized entrypoint. Strip any CR so a Windows-checked-out entrypoint
+# (CRLF) doesn't turn the shebang into `/bin/sh\r` -> "no such file or directory".
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser && \

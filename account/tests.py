@@ -46,6 +46,33 @@ class AccountTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("token", response.data)
 
+    def test_login_auto_verifies_in_non_production(self):
+        unverified = User.objects.create_user(
+            email="unverified@example.com",
+            name="Unverified",
+            password="testpassword123",
+        )
+        self.assertFalse(unverified.is_active)
+        self.assertFalse(unverified.is_verified)
+
+        response = self.client.post(
+            self.login_url,
+            {"email": "unverified@example.com", "password": "testpassword123"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("token", response.data)
+
+        unverified.refresh_from_db()
+        self.assertTrue(unverified.is_active)
+        self.assertTrue(unverified.is_verified)
+
+    def test_login_rejects_bad_password(self):
+        response = self.client.post(
+            self.login_url,
+            {"email": "test@example.com", "password": "wrong"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
     def test_user_profile_access(self):
         response = self.client.get(self.profile_url, **self.auth_headers)
         self.assertEqual(response.status_code, status.HTTP_200_OK)

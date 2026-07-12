@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/videos/", include("videos.urls")),
     path("api/files/", include("files.urls")),
     path("api/account/", include("account.urls")),
+    path("api/plans/", include("plans.urls")),
     path("api/billing/", include("billing.urls")),
     # backward-compat aliases
     path("api/textutils/", include("videos.urls")),

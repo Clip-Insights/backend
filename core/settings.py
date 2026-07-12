@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "videos.apps.VideosConfig",
     "account",
     "analytics",
+    "plans",
     "billing",
 ]
 
@@ -125,8 +126,21 @@ DATABASES = {
         "PASSWORD": os.getenv("DATABASE_PASSWORD", ""),
         "HOST": os.getenv("DATABASE_HOST", ""),
         "PORT": os.getenv("DATABASE_PORT", ""),
+        # Keep connections alive between requests. The TLS handshake to
+        # CockroachDB Cloud costs ~1-2s; Django's default (CONN_MAX_AGE=0)
+        # paid it on every single request.
+        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", 600)),
+        "CONN_HEALTH_CHECKS": True,
         'OPTIONS': {
             'sslmode': 'verify-full',
+            # Explicit CA path. libpq's default (~/.postgresql/root.crt)
+            # depends on the running user's home dir, which differs between
+            # local dev (Windows), root, and the container's appuser.
+            **(
+                {'sslrootcert': os.environ['DATABASE_CERT_PATH']}
+                if os.environ.get('DATABASE_CERT_PATH')
+                else {}
+            ),
         }
     }
 }
@@ -184,7 +198,7 @@ REST_FRAMEWORK = {
 # https://django-rest-framework-simplejwt.readthedocs.io/en/latest/
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=600),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
@@ -197,8 +211,8 @@ EMAIL_HOST_USER = os.getenv("EMAIL_USERNAME")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "False") == "True"
-# Default sender — keep it tied to the authenticated SMTP user so it never
-# drifts from the credentials (Gmail rejects a From it doesn't own).
+# Sender address: SMTP login user by default; for Resend set DEFAULT_FROM_EMAIL
+# to a verified domain address (e.g. ClipInsights <noreply@yourdomain.com>).
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 # Fail fast instead of hanging if the SMTP server is unreachable.
 EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", 15))
@@ -260,3 +274,4 @@ LOGGING = {
 AUTH_USER_MODEL = "account.User"
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_EXTENSION_CLIENT_ID = os.environ.get("GOOGLE_EXTENSION_CLIENT_ID")

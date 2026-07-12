@@ -43,6 +43,7 @@ logs
 /media/temp/*
 *.code-workspace
 *credentials*
+client_secrets.json
 *embeddings*
 *.sqlite3
 chroma_db/

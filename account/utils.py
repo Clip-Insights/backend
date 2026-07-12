@@ -1,11 +1,28 @@
-import logging
-
+import os
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
 from integrations.registry import get_email
-
-logger = logging.getLogger(__name__)
 
 
 class Util:
+    @staticmethod
+    def verification_email_data(user):
+        uid = urlsafe_base64_encode(force_bytes(str(user.id)))
+        token = PasswordResetTokenGenerator().make_token(user)
+        domain = os.getenv("EMAIL_URL_DOMAIN", "http://localhost:3000/")
+        link = domain + "verify-email/" + uid + "/" + token
+        return {
+            "subject": "Verify Your Email Address",
+            "link": link,
+            "username": user.name,
+            "to_email": user.email,
+        }
+
+    @staticmethod
+    def send_verification_email(user):
+        Util.send_email(Util.verification_email_data(user))
+
     @staticmethod
     def send_email(data):
         if data['subject'] == "Verify Your Email Address":
@@ -31,6 +48,3 @@ Best regards,
 The ClipInsights Team
 """
         get_email().send(to=data["to_email"], subject=data["subject"], body=body)
-
-def convert_to_bytes(mbs):
-    return mbs * 1024 * 1024

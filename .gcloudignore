@@ -1,0 +1,44 @@
+# Controls what `gcloud ... --source .` uploads to Cloud Build.
+# Keep this in sync with .dockerignore for anything that must never ship.
+
+# Secrets / local env — never upload
+.env
+.env.*
+credentials.py
+*credentials*
+client_secrets.json
+
+# Virtualenv / deps (rebuilt inside the image)
+.venv/
+venv/
+env/
+ENV/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local dev artifacts
+logs/
+*.log
+*.sqlite3
+*.sqlite
+*.db
+*.pkl
+media/
+staticfiles/
+static/
+chroma_db/
+embeddings/
+
+# VCS / IDE / OS
+.git/
+.gitignore
+.idea/
+.vscode/
+.cursor/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+*.code-workspace

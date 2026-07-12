@@ -1,106 +1,69 @@
 import json
-from datetime import date
+from datetime import timedelta
 from io import StringIO
-from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.timezone import now
 from rest_framework.test import APIClient
 
-from billing.models import Plan, Subscription, UsagePeriod
-from billing.services import (
-    apply_subscription_event,
-    check_quota,
-    estimate_tokens,
-    get_active_plan,
-    record_usage,
-)
+from billing.models import PaddlePlanMap, Subscription
+from billing.services import apply_subscription_event, plan_for_price_id
+from plans.models import Plan, UserPlan
+from plans.services import get_plan_for
 
 User = get_user_model()
 
 
-def seed_plans():
-    call_command("setup_billing", "--no-paddle", stdout=StringIO())
+def sync_paddle():
+    call_command("setup_billing", stdout=StringIO())  # noop provider fills fake ids
 
 
 def make_user(email="user@test.com"):
     return User.objects.create_user(email=email, name="Test User", password="StrongPass1!")
 
 
-class PlanSeedingTests(TestCase):
-    def test_setup_billing_seeds_three_plans_idempotently(self):
-        seed_plans()
-        seed_plans()
-        self.assertEqual(Plan.objects.count(), 3)
-        pro = Plan.objects.get(code="pro")
-        self.assertEqual(pro.monthly_summary_quota, 200)
-        self.assertEqual(float(pro.price_monthly_usd), 12.0)
+def effective_plan(user):
+    """get_plan_for on a freshly loaded user.
 
-    def test_paddle_sync_fills_ids_with_noop_provider(self):
-        call_command("setup_billing", stdout=StringIO())
-        pro = Plan.objects.get(code="pro")
-        self.assertTrue(pro.paddle_product_id.startswith("pro_noop_"))
-        self.assertTrue(pro.paddle_price_id_monthly)
-        self.assertTrue(pro.paddle_price_id_annual)
-        self.assertEqual(Plan.objects.get(code="free").paddle_product_id, "")
+    The signup signal caches the free UserPlan on the in-memory user instance
+    (OneToOne reverse cache); webhooks update the row, not that cache. Real
+    requests always load a fresh user, so tests must too.
+    """
+    return get_plan_for(User.objects.get(pk=user.pk))
 
 
-class QuotaTests(TestCase):
-    def setUp(self):
-        seed_plans()
-        self.user = make_user()
+class SetupBillingCommandTests(TestCase):
+    def test_creates_paddle_map_for_paid_plans_only(self):
+        sync_paddle()
+        slugs = set(PaddlePlanMap.objects.values_list("plan__slug", flat=True))
+        self.assertEqual(slugs, {"pro", "premium"})
 
-    def test_defaults_to_free_plan(self):
-        self.assertEqual(get_active_plan(self.user).code, "free")
+    def test_idempotent_and_annual_is_ten_months(self):
+        sync_paddle()
+        first = PaddlePlanMap.objects.get(plan__slug="pro")
+        monthly_id, product_id = first.paddle_price_id_monthly, first.paddle_product_id
+        sync_paddle()
+        again = PaddlePlanMap.objects.get(plan__slug="pro")
+        self.assertEqual(again.paddle_price_id_monthly, monthly_id)
+        self.assertEqual(again.paddle_product_id, product_id)
+        self.assertEqual(float(again.annual_price_usd), float(again.plan.monthly_price_usd) * 10)
 
-    def test_no_plans_seeded_means_no_enforcement(self):
-        Plan.objects.all().delete()
-        allowed, info = check_quota(self.user, "summary")
-        self.assertTrue(allowed)
-        self.assertEqual(info, {})
-
-    def test_summary_quota_blocks_at_limit(self):
-        usage = UsagePeriod.objects.create(user=self.user, period=date.today().replace(day=1), summaries_used=15)
-        allowed, info = check_quota(self.user, "summary")
-        self.assertFalse(allowed)
-        self.assertIn("quota", info)
-        self.assertEqual(info["used"], 15)
-
-    def test_token_quota_blocks_even_below_action_quota(self):
-        UsagePeriod.objects.create(user=self.user, period=date.today().replace(day=1), tokens_used=250_000)
-        allowed, info = check_quota(self.user, "chat")
-        self.assertFalse(allowed)
-
-    def test_record_usage_increments_counters(self):
-        record_usage(self.user, "summary", tokens=9000)
-        record_usage(self.user, "chat", tokens=2000)
-        usage = UsagePeriod.objects.get(user=self.user)
-        self.assertEqual(usage.summaries_used, 1)
-        self.assertEqual(usage.chats_used, 1)
-        self.assertEqual(usage.tokens_used, 11000)
-
-    def test_active_subscription_upgrades_plan(self):
-        pro = Plan.objects.get(code="pro")
-        Subscription.objects.create(user=self.user, plan=pro, status="active")
-        self.assertEqual(get_active_plan(self.user).code, "pro")
-
-    def test_canceled_subscription_falls_back_to_free(self):
-        pro = Plan.objects.get(code="pro")
-        Subscription.objects.create(user=self.user, plan=pro, status="canceled")
-        self.assertEqual(get_active_plan(self.user).code, "free")
-
-    def test_estimate_tokens_uses_char_heuristic(self):
-        self.assertEqual(estimate_tokens("x" * 300), 100)
-        self.assertEqual(estimate_tokens(""), 0)
+    def test_price_id_round_trip(self):
+        sync_paddle()
+        mapping = PaddlePlanMap.objects.get(plan__slug="premium")
+        plan, cycle = plan_for_price_id(mapping.paddle_price_id_annual)
+        self.assertEqual((plan.slug, cycle), ("premium", "annual"))
+        self.assertEqual(plan_for_price_id("pri_unknown"), (None, None))
 
 
 class WebhookEventTests(TestCase):
     def setUp(self):
-        call_command("setup_billing", stdout=StringIO())  # noop paddle ids
+        sync_paddle()
         self.user = make_user()
-        self.pro = Plan.objects.get(code="pro")
+        self.pro_map = PaddlePlanMap.objects.get(plan__slug="pro")
 
     def _event_data(self, **overrides):
         data = {
@@ -108,29 +71,39 @@ class WebhookEventTests(TestCase):
             "status": "active",
             "customer_id": "ctm_123",
             "custom_data": {"user_id": str(self.user.id)},
-            "items": [{"price": {"id": self.pro.paddle_price_id_monthly}}],
-            "current_billing_period": {"ends_at": "2026-08-01T00:00:00Z"},
+            "items": [{"price": {"id": self.pro_map.paddle_price_id_monthly}}],
+            "current_billing_period": {"ends_at": (now() + timedelta(days=30)).isoformat()},
         }
         data.update(overrides)
         return data
 
-    def test_subscription_created_activates_plan(self):
+    def test_subscription_created_grants_entitlement(self):
         self.assertTrue(apply_subscription_event("subscription.created", self._event_data()))
+        self.assertEqual(effective_plan(self.user).slug, "pro")
         sub = Subscription.objects.get(user=self.user)
-        self.assertEqual(sub.plan.code, "pro")
-        self.assertEqual(sub.status, "active")
-        self.assertEqual(sub.billing_cycle, "monthly")
-        self.assertEqual(get_active_plan(self.user).code, "pro")
+        self.assertEqual((sub.plan.slug, sub.status, sub.billing_cycle), ("pro", "active", "monthly"))
+        user_plan = UserPlan.objects.get(user=self.user)
+        self.assertIsNotNone(user_plan.expires_at)  # period end + grace
 
     def test_annual_price_maps_to_annual_cycle(self):
-        data = self._event_data(items=[{"price": {"id": self.pro.paddle_price_id_annual}}])
+        data = self._event_data(items=[{"price": {"id": self.pro_map.paddle_price_id_annual}}])
         apply_subscription_event("subscription.created", data)
         self.assertEqual(Subscription.objects.get(user=self.user).billing_cycle, "annual")
 
-    def test_cancellation_event_downgrades(self):
+    def test_canceled_event_reverts_to_free(self):
         apply_subscription_event("subscription.created", self._event_data())
         apply_subscription_event("subscription.canceled", self._event_data(status="canceled"))
-        self.assertEqual(get_active_plan(self.user).code, "free")
+        self.assertEqual(effective_plan(self.user).slug, "free")
+        self.assertEqual(Subscription.objects.get(user=self.user).status, "canceled")
+
+    def test_expired_entitlement_falls_back_to_free(self):
+        past = (now() - timedelta(days=1)).isoformat()
+        apply_subscription_event(
+            "subscription.updated", self._event_data(current_billing_period={"ends_at": past}))
+        # expires_at = yesterday + 2 days grace = tomorrow -> still pro
+        self.assertEqual(effective_plan(self.user).slug, "pro")
+        UserPlan.objects.filter(user=self.user).update(expires_at=now() - timedelta(hours=1))
+        self.assertEqual(effective_plan(self.user).slug, "free")
 
     def test_unknown_user_or_price_is_skipped(self):
         self.assertFalse(apply_subscription_event(
@@ -142,27 +115,26 @@ class WebhookEventTests(TestCase):
 
 class BillingEndpointTests(TestCase):
     def setUp(self):
-        call_command("setup_billing", stdout=StringIO())
+        sync_paddle()
         self.user = make_user()
         self.client = APIClient()
 
-    def test_plans_endpoint_is_public(self):
-        response = self.client.get(reverse("billing-plans"))
+    def test_catalog_is_public_and_lists_paid_plans(self):
+        response = self.client.get(reverse("billing-catalog"))
         self.assertEqual(response.status_code, 200)
-        codes = [p["code"] for p in response.json()["plans"]]
-        self.assertEqual(codes, ["free", "pro", "premium"])
+        catalog = {c["plan_slug"]: c for c in response.json()["catalog"]}
+        self.assertEqual(set(catalog), {"pro", "premium"})
+        self.assertTrue(catalog["pro"]["paddle_price_id_monthly"])
+        self.assertEqual(catalog["pro"]["annual_price_usd"], catalog["pro"]["monthly_price_usd"] * 10)
 
     def test_subscription_endpoint_requires_auth(self):
         self.assertEqual(self.client.get(reverse("billing-subscription")).status_code, 401)
 
-    def test_subscription_endpoint_returns_plan_and_usage(self):
+    def test_subscription_endpoint_none_without_subscription(self):
         self.client.force_authenticate(self.user)
         response = self.client.get(reverse("billing-subscription"))
         self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["plan"]["code"], "free")
-        self.assertIsNone(body["subscription"])
-        self.assertEqual(body["usage"]["summaries_used"], 0)
+        self.assertIsNone(response.json()["subscription"])
 
     def test_checkout_returns_paddle_config(self):
         self.client.force_authenticate(self.user)
@@ -172,78 +144,76 @@ class BillingEndpointTests(TestCase):
         body = response.json()
         self.assertEqual(body["environment"], "sandbox")
         self.assertEqual(body["user_id"], str(self.user.id))
-        self.assertTrue(body["price_id"])
+        self.assertEqual(body["email"], self.user.email)
+        self.assertEqual(body["price_id"], PaddlePlanMap.objects.get(plan__slug="pro").paddle_price_id_annual)
 
-    def test_checkout_rejects_free_and_unknown_plans(self):
+    def test_checkout_rejects_free_guest_and_unknown_plans(self):
         self.client.force_authenticate(self.user)
-        self.assertEqual(self.client.post(reverse("billing-checkout"),
-                                          {"plan_code": "free"}, format="json").status_code, 400)
-        self.assertEqual(self.client.post(reverse("billing-checkout"),
-                                          {"plan_code": "nope"}, format="json").status_code, 400)
+        for slug in ("free", "guest", "nope"):
+            response = self.client.post(reverse("billing-checkout"), {"plan_code": slug}, format="json")
+            self.assertEqual(response.status_code, 400, slug)
+
+    def test_checkout_unsynced_plan_returns_503(self):
+        PaddlePlanMap.objects.all().delete()
+        self.client.force_authenticate(self.user)
+        response = self.client.post(reverse("billing-checkout"), {"plan_code": "pro"}, format="json")
+        self.assertEqual(response.status_code, 503)
 
     def test_webhook_applies_subscription_event(self):
-        pro = Plan.objects.get(code="pro")
+        mapping = PaddlePlanMap.objects.get(plan__slug="pro")
         payload = {
             "event_type": "subscription.created",
             "data": {
                 "id": "sub_wh", "status": "active", "customer_id": "ctm_wh",
                 "custom_data": {"user_id": str(self.user.id)},
-                "items": [{"price": {"id": pro.paddle_price_id_monthly}}],
-                "current_billing_period": {"ends_at": "2026-08-01T00:00:00Z"},
+                "items": [{"price": {"id": mapping.paddle_price_id_monthly}}],
+                "current_billing_period": {"ends_at": (now() + timedelta(days=30)).isoformat()},
             },
         }
         response = self.client.post(reverse("billing-webhook"),
                                     json.dumps(payload), content_type="application/json")
         self.assertEqual(response.status_code, 200)  # noop provider accepts signature
-        self.assertEqual(Subscription.objects.get(user=self.user).plan.code, "pro")
+        self.assertEqual(effective_plan(self.user).slug, "pro")
 
-
-class QuotaEnforcementInVideoViewsTests(TestCase):
-    def setUp(self):
-        seed_plans()
-        self.user = make_user()
-        self.client = APIClient()
-
-    def test_anonymous_summary_is_not_metered(self):
-        response = self.client.post("/api/videos/summary/",
-                                    {"youtube_url": "https://youtube.com/watch?v=x",
-                                     "transcription": "words " * 50}, format="json")
+    def test_webhook_ignores_non_subscription_events(self):
+        response = self.client.post(reverse("billing-webhook"),
+                                    json.dumps({"event_type": "transaction.completed", "data": {}}),
+                                    content_type="application/json")
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(UsagePeriod.objects.exists())
 
-    def test_authenticated_summary_records_usage(self):
+    def test_cancel_without_subscription_is_400(self):
         self.client.force_authenticate(self.user)
-        response = self.client.post("/api/videos/summary/",
-                                    {"youtube_url": "https://youtube.com/watch?v=x",
-                                     "transcription": "words " * 50}, format="json")
+        self.assertEqual(self.client.post(reverse("billing-cancel")).status_code, 400)
+
+    def test_cancel_active_subscription_schedules_cancellation(self):
+        mapping = PaddlePlanMap.objects.get(plan__slug="pro")
+        apply_subscription_event("subscription.created", {
+            "id": "sub_c", "status": "active", "customer_id": "ctm_c",
+            "custom_data": {"user_id": str(self.user.id)},
+            "items": [{"price": {"id": mapping.paddle_price_id_monthly}}],
+            "current_billing_period": {"ends_at": (now() + timedelta(days=30)).isoformat()},
+        })
+        self.client.force_authenticate(self.user)
+        response = self.client.post(reverse("billing-cancel"))
         self.assertEqual(response.status_code, 200)
-        usage = UsagePeriod.objects.get(user=self.user)
-        self.assertEqual(usage.summaries_used, 1)
-        self.assertGreater(usage.tokens_used, 0)
+        self.assertTrue(Subscription.objects.get(user=self.user).cancel_at_period_end)
 
-    def test_over_quota_summary_returns_429(self):
-        UsagePeriod.objects.create(user=self.user, period=date.today().replace(day=1), summaries_used=15)
-        self.client.force_authenticate(self.user)
-        response = self.client.post("/api/videos/summary/",
-                                    {"youtube_url": "https://youtube.com/watch?v=x",
-                                     "transcription": "words " * 50}, format="json")
-        self.assertEqual(response.status_code, 429)
-        self.assertEqual(response.json()["error"], "quota_exceeded")
 
-    def test_over_quota_chat_returns_429(self):
-        UsagePeriod.objects.create(user=self.user, period=date.today().replace(day=1), chats_used=50)
-        self.client.force_authenticate(self.user)
-        response = self.client.post("/api/videos/chat/",
-                                    {"youtube_url": "https://youtube.com/watch?v=x",
-                                     "query": "what?", "transcription": "words " * 50}, format="json")
-        self.assertEqual(response.status_code, 429)
+class PaddleSignatureTests(TestCase):
+    """Real HMAC verification on the concrete Paddle provider (no API calls)."""
 
-    def test_authenticated_chat_records_usage_after_stream(self):
-        self.client.force_authenticate(self.user)
-        response = self.client.post("/api/videos/chat/",
-                                    {"youtube_url": "https://youtube.com/watch?v=x",
-                                     "query": "what?", "transcription": "words " * 50}, format="json")
-        self.assertEqual(response.status_code, 200)
-        b"".join(response.streaming_content)  # drain the stream
-        usage = UsagePeriod.objects.get(user=self.user)
-        self.assertEqual(usage.chats_used, 1)
+    def test_signature_verification(self):
+        import hashlib
+        import hmac as hmac_lib
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"PADDLE_WEBHOOK_SECRET": "whsec_test", "PADDLE_ENV": "sandbox"}):
+            from integrations.payment.paddle import PaddlePayment
+            provider = PaddlePayment()
+            body = b'{"event_type":"subscription.created"}'
+            good = hmac_lib.new(b"whsec_test", b"123:" + body, hashlib.sha256).hexdigest()
+            self.assertTrue(provider.verify_webhook(body, f"ts=123;h1={good}"))
+            self.assertFalse(provider.verify_webhook(body, f"ts=124;h1={good}"))
+            self.assertFalse(provider.verify_webhook(body, "garbage"))
+            self.assertFalse(provider.verify_webhook(body, ""))

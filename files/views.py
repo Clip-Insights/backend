@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from integrations.registry import get_storage
+from plans.services import LimitExceeded, get_plan_for
 from .models import File, Folder
 from .serializers import FileSerializer, FolderSerializer
 from .utils import storage_info
@@ -46,6 +47,19 @@ class FileAPIView(APIView):
         file = request.FILES["file"]
         if file.content_type != "application/pdf":
             return Response({"error": "Only PDF files are allowed"}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan = get_plan_for(request.user)
+        if file.size > plan.max_file_size_bytes:
+            raise LimitExceeded(
+                reason="max_file_size",
+                message=f"This file exceeds your plan's {plan.max_file_size_mb} MB per-file limit.",
+            )
+        if file.size > storage_info(request.user)["remaining_space"]:
+            raise LimitExceeded(
+                reason="storage_limit",
+                message=f"You have used your {plan.storage_limit_mb} MB of storage. "
+                "Delete some files or upgrade your plan.",
+            )
 
         filename = file.name
         base_name, extension = os.path.splitext(filename)
@@ -251,7 +265,7 @@ class StorageInfoAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        space_info = storage_info(_user_id(request))
+        space_info = storage_info(request.user)
         return Response(
             {
                 "used_space": space_info["used_space"],
