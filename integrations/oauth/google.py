@@ -35,6 +35,11 @@ class GoogleOAuthVerifier:
                         token,
                         http_request,
                         client_id,
+                        # Tolerate small clock drift between this machine and
+                        # Google (default is 0s; a clock a couple of seconds
+                        # slow rejects every token with "Token used too
+                        # early"). 10s is the library's documented maximum.
+                        clock_skew_in_seconds=10,
                     )
                     return {
                         "email": idinfo["email"],

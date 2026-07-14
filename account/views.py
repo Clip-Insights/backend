@@ -222,7 +222,10 @@ class GoogleLoginView(APIView):
                 status=status.HTTP_200_OK
             )
 
-        except ValueError:
+        except ValueError as e:
+            # The verifier's message says which check failed (audience, expiry,
+            # clock skew, missing client id) — essential for diagnosing sign-in.
+            logger.warning("Google login rejected: %s", e)
             return Response(
                 {'error': 'Invalid Google token'},
                 status=status.HTTP_400_BAD_REQUEST

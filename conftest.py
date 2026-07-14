@@ -13,3 +13,7 @@ os.environ.setdefault("EMBEDDING_PROVIDER", "noop")
 os.environ.setdefault("VECTORSTORE_PROVIDER", "memory")
 os.environ.setdefault("LLM_API_KEYS", "test-key")
 os.environ.setdefault("FIREWORKS_API_KEYS", "test-key")
+# Forced, not setdefault: settings' load_dotenv() may already have set this
+# from .env (dotenv does not override, but it runs before this file on some
+# paths), and tests must never talk to the real Paddle API.
+os.environ["PAYMENT_PROVIDER"] = "noop"
