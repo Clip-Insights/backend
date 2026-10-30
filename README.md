@@ -1,8 +1,10 @@
 # Clip Insights — Backend
 
+[Project overview](https://github.com/Clip-Insights) · [System architecture](https://github.com/Clip-Insights/.github/blob/main/docs/ARCHITECTURE.md) · [Website](https://clipinsights.org)
+
 Django + Django REST Framework API that powers the [Clip Insights](https://github.com/Clip-Insights) browser extension and web app. It handles authentication, plans and usage limits, file storage, and the AI features: transcription, summaries, key points, and RAG-based chat about a video.
 
-The API is stateless HTTP/JSON. Every external service (LLM, embeddings, transcription, storage, email, OAuth, analytics) sits behind a provider abstraction and is selected by an environment variable, so vendors can be swapped without touching feature code.
+The API uses HTTP/JSON and server-sent events for streaming chat. Every external service (LLM, embeddings, transcription, storage, email, OAuth, analytics) sits behind a provider abstraction and is selected by an environment variable, so vendors can be swapped without touching feature code.
 
 > For the full design — the provider registry, per-app internals, the RAG data flow, and deployment details — see **[ARCHITECTURE.md](./ARCHITECTURE.md)**. For contributor standards and the testing rule, see **[AGENTS.md](./AGENTS.md)**.
 
@@ -20,7 +22,7 @@ The API is stateless HTTP/JSON. Every external service (LLM, embeddings, transcr
 
 ### How chat works (RAG)
 
-The client sends the transcript with each chat request. The backend chunks it, embeds the chunks once per video, stores the vectors in a **CockroachDB pgvector** store keyed by the video URL, and retrieves only the **top-3 most relevant chunks** to feed the model — never the whole transcript. If retrieval fails, chat degrades gracefully to a bounded slice of the transcript instead of breaking. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the details.
+The client sends the transcript with each chat request. The backend chunks it, embeds the chunks once per video, stores the vectors in a **CockroachDB pgvector** store keyed by the video URL, and retrieves only the **top-3 most relevant chunks** to feed the model for the model context. If retrieval fails, chat degrades gracefully to a bounded slice of the transcript instead of breaking. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the details.
 
 ## Tech stack
 
@@ -72,11 +74,10 @@ Settings live in `core/settings.py` and are read from `.env` (via `python-dotenv
 | Variable | Purpose |
 |---|---|
 | `DJANGO_ENV` | Set to `production` to disable `DEBUG` |
-| `SECRET_KEY` | Django secret key |
 | `DATABASE_NAME` / `USER` / `PASSWORD` / `HOST` / `PORT` | CockroachDB connection |
 | `DATABASE_CERT_PATH` | Path to the CockroachDB CA certificate (`sslmode=verify-full`) |
 | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_OUTPUT_TOKENS` | LLM selection and tuning |
-| `LLM_API_KEYS` | Comma-separated LLM keys (rotated round-robin) |
+| `FIREWORKS_API_KEYS` / `LLM_API_KEYS` | Fireworks / Gemini keys for the selected provider (comma-separated, rotated round-robin) |
 | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS` | Embeddings for RAG |
 | `VECTORSTORE_PROVIDER` | `cockroach` (prod) or `memory` (tests) |
 | `TRANSCRIPTION_PROVIDER`, `GROQ_API_KEYS` | Whisper transcription |
@@ -126,4 +127,5 @@ clip-insights-be/
 ## Related repositories
 
 - **[chrome-extension](https://github.com/Clip-Insights/chrome-extension)** — the browser extension client
-- **[clip-insights-fe](https://github.com/zubayr-ahmad/clip-insights-fe)** — the web app / account dashboard
+- **[web-app](https://github.com/Clip-Insights/web-app)** — the web app / account dashboard
+- **[main-site](https://github.com/Clip-Insights/main-site)** — the public website and product guides
